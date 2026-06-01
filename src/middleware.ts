@@ -76,6 +76,10 @@ const isStaffRoute = createRouteMatcher([
   "/expenses/(.*)",
   "/reports",
   "/reports/(.*)",
+  "/phase-planning",
+  "/phase-planning/(.*)",
+  "/phase-3d",
+  "/phase-3d/(.*)",
 ]);
 const isAdminRoute = createRouteMatcher(["/admin", "/admin/(.*)"]);
 const isCustomerRoute = createRouteMatcher(["/portal", "/portal/(.*)"]);
@@ -218,7 +222,7 @@ export default convexAuthNextjsMiddleware(async (request, { convexAuth }) => {
 
   // Staff login (/login):
   //   - authenticated customer → /portal (customers don't sign in here)
-  //   - authenticated staff    → /dashboard
+  //   - authenticated staff    → /phase-3d (post-login landing)
   //   - unauthenticated        → render the login page
   if (isLoginRoute(request) && authed) {
     const result = await fetchRoles();
@@ -228,7 +232,7 @@ export default convexAuthNextjsMiddleware(async (request, { convexAuth }) => {
     const roles = result.kind === "ok" ? result.roles : [];
     return nextjsMiddlewareRedirect(
       request,
-      isCustomerOnlyRoles(roles) ? "/portal" : "/dashboard",
+      isCustomerOnlyRoles(roles) ? "/portal" : "/phase-3d",
     );
   }
 

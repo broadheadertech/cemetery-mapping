@@ -52,7 +52,10 @@ export default function LoginPage() {
         password,
         flow: mode,
       });
-      router.push("/dashboard");
+      // Post-login landing for staff. Customers who somehow authenticate
+      // here are re-routed to /portal by the middleware (which treats
+      // /phase-3d as a staff route).
+      router.push("/phase-3d");
     } catch {
       // Convex Auth throws on any failure (wrong creds, duplicate email,
       // weak password, network error, etc.). For security we surface the
