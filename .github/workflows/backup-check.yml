@@ -1,0 +1,66 @@
+name: Backup verification reminder
+
+# Story 5.6 (FR61, NFR-R2). Weekly reminder that the quarterly
+# Convex-backup dashboard verification is due (or overdue).
+#
+# This workflow is NOT a programmatic backup health check — Convex
+# does not expose backup metadata via the SDK or a documented API
+# at the time ADR-0017 was written. The workflow's job is to make a
+# missed quarterly verification VISIBLE: when the ADR's
+# Verification ledger gets stale (> 100 days), this run fails and
+# GitHub's default notification surfaces it to the on-call dev.
+#
+# Remediation when this workflow fails:
+#   1. Follow docs/runbook.md → "Backup configuration verification
+#      (quarterly)".
+#   2. Append a fresh `YYYY-MM-DD` row to
+#      docs/adr/0017-database-backups.md § Verification ledger.
+#   3. Update `LAST_VERIFIED_AT` in convex/healthCheck.ts to match.
+#   4. Commit + push. The next run goes green.
+
+on:
+  schedule:
+    # Every Monday at 09:00 UTC == 17:00 Asia/Manila. The runbook's
+    # quarterly verification is scheduled for 10:00 Manila on the
+    # first Monday; the weekly reminder runs in the same window so
+    # the on-call dev sees a fresh failure right before the
+    # quarterly cadence comes due.
+    - cron: "0 9 * * 1"
+  # Manual dispatch — useful for verifying the workflow's behaviour
+  # without waiting for Monday or for confirming a ledger update
+  # immediately after pushing it.
+  workflow_dispatch:
+  # Also run on pushes that touch the documents the check validates,
+  # so a broken ADR / runbook edit fails fast at PR-merge time
+  # rather than waiting for the Monday cron.
+  push:
+    branches: [main]
+    paths:
+      - "docs/adr/0017-database-backups.md"
+      - "docs/runbook.md"
+      - "scripts/check-backups.mjs"
+      - ".github/workflows/backup-check.yml"
+
+concurrency:
+  group: backup-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Backup verification check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # The check itself doesn't open issues. If a future enhancement
+      # wants to auto-open a tracking issue when the ledger goes stale,
+      # add `issues: write` here and update the script accordingly.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          # No `cache: npm` — the check script is zero-dependency
+          # (Node built-ins only); skipping `npm ci` keeps the
+          # workflow under 10 seconds and avoids cache churn.
+      - name: Run backup-verification check
+        run: node scripts/check-backups.mjs

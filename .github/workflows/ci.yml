@@ -1,0 +1,124 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-progress runs for the same branch when a new commit arrives.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run lint
+
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run typecheck
+      # Story 2.8 — ADR-0007 (PII encryption) compliance check.
+      # Fails the build if ADR-0007 is deleted or if convex/schema.ts
+      # introduces a v.bytes() field in the customers / customerDocuments
+      # tables without an explicit amendment marker. Zero-dependency
+      # Node script; no extra install step required.
+      - name: ADR-0007 compliance check
+        run: npm run check:adr-0007
+
+  vitest:
+    name: Vitest (unit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - run: npm test
+
+  playwright:
+    name: Playwright (smoke)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - run: npm run test:e2e:install
+      - run: npm run build
+      - run: npm run test:e2e
+        env:
+          CI: "true"
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  # Story 5.8: NFR-P6 bundle-size gate. Parses `.next/app-build-manifest.json`
+  # after a production build and asserts each route's gzipped initial JS
+  # stays under 250 KB. Heavy libs (Leaflet / PDFKit) must be lazy-loaded;
+  # this gate catches accidental top-level imports.
+  bundle-size:
+    name: Bundle size (NFR-P6)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - name: Cache Next.js build
+        uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('next.config.ts') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
+      - run: npm run build
+      - run: npm run check:bundle-size
+
+  # Story 5.8: tightened from the Story 1.1 loose / continue-on-error
+  # baseline. The gate now fails the build when Lighthouse can't meet
+  # NFR-P targets (perf ≥ 0.9, a11y ≥ 0.95, best-practices ≥ 0.9, SEO ≥ 0.9).
+  lighthouse:
+    name: Lighthouse (NFR-P)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run build
+      - run: npm run lighthouse

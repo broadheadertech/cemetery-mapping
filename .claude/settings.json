@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(echo \"TSC_EXIT=$?\")",
+      "Bash(echo \"VITEST_EXIT=$?\")",
+      "Bash(awk '{print $6, $7, $8, $9}')",
+      "Bash(echo \"LINT_EXIT=$?\")",
+      "Bash(echo \"TSC=$?\")",
+      "Bash(echo \"LINT=$?\")",
+      "Bash(echo \"VITEST=$?\")",
+      "Bash(echo \"BUILD=$?\")",
+      "Bash(awk '{printf \"%-20s %s\\\\n\", $5, $9}')"
+    ]
+  }
+}

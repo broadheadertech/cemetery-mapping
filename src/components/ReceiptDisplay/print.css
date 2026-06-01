@@ -1,0 +1,123 @@
+/*
+ * Receipt print stylesheet — Story 3.13 (FR30).
+ *
+ * Used by the existing inline print path on the receipt detail page:
+ * Story 3.11 added a "Print" button that calls `window.print()` and
+ * wraps the surrounding chrome in `print:hidden` Tailwind classes.
+ * Story 3.13 adds this stylesheet for the cases Tailwind's `print:`
+ * variants don't cover cleanly — page-level margins, table-row
+ * page-break behaviour, removing background colours, and ensuring
+ * the voided watermark shows up on a printed page.
+ *
+ * Why a stylesheet AND a PDF action: the PDF action (Story 3.13
+ * `generateReceiptPdf`) produces a downloadable, share-able artifact
+ * the cemetery can email or archive. The print stylesheet is the
+ * "I want a paper copy right now" path — instant, no scheduler
+ * round-trip, works even when the PDF action hasn't completed.
+ * Both paths consume the same underlying receipt data and the same
+ * BIR-format helpers from `convex/lib/birFormat.ts`, so the two
+ * outputs stay consistent.
+ *
+ * Scope notes:
+ *   - This file is imported globally by the receipt detail page so
+ *     `@media print` rules only fire when the browser is in
+ *     print-preview mode. It does NOT affect the screen layout.
+ *   - Tailwind tokens are referenced by their resolved values (the
+ *     printer doesn't have access to CSS variables defined by the
+ *     Tailwind preflight on a per-page basis in all browsers; we
+ *     spell out colour fallbacks explicitly).
+ */
+
+@media print {
+  /*
+   * Reset the page margins. The browser's default margin is large
+   * enough to push the receipt onto two pages in some browsers; a
+   * 0.5in margin gives a clean BIR-style single-page printout.
+   */
+  @page {
+    size: letter;
+    margin: 0.5in;
+  }
+
+  /*
+   * Hide every page chrome element. The Tailwind `print:hidden`
+   * utility marks the breadcrumb and toolbar; this rule also strips
+   * any leftover navigation chrome that escaped the utility (e.g.
+   * the staff-shell layout's sidebar). The receipt detail content
+   * carries `data-testid="receipt-display"` and is the ONLY
+   * element that should print.
+   */
+  body * {
+    visibility: hidden;
+  }
+  [data-testid="receipt-display"],
+  [data-testid="receipt-display"] * {
+    visibility: visible;
+  }
+  [data-testid="receipt-display"] {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    border: 0;
+    box-shadow: none;
+    padding: 0;
+    background: #ffffff;
+    color: #000000;
+  }
+
+  /*
+   * Ensure backgrounds + borders render. By default, most browsers
+   * strip background colours on print to save ink. The receipt's
+   * voided banner (red) and placeholder banner (amber) carry
+   * legally-meaningful colour, so we override.
+   */
+  [data-testid="receipt-voided-banner"],
+  [data-testid="receipt-placeholder-banner"] {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    color-adjust: exact;
+    page-break-inside: avoid;
+  }
+
+  /*
+   * Prevent the line-items table from being split across pages.
+   * BIR-format receipts always fit on one page when printed at
+   * 0.5in margins; the rule is defensive against unusually long
+   * allocation lists (e.g. a 12-installment lump payment).
+   */
+  [data-testid="receipt-display"] table {
+    page-break-inside: avoid;
+  }
+  [data-testid="receipt-display"] tr,
+  [data-testid="receipt-display"] td,
+  [data-testid="receipt-display"] th {
+    page-break-inside: avoid;
+  }
+
+  /*
+   * Tabular numerals — print engines sometimes substitute
+   * proportional figures when Helvetica's tabular variant isn't
+   * available. Re-asserting `font-variant-numeric` here forces the
+   * engine to align the digits when the font supports it.
+   */
+  [data-testid="receipt-total-amount"],
+  [data-testid="receipt-tin"],
+  [data-testid="receipt-atp"],
+  [data-testid="receipt-number"] {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /*
+   * Hide the receipt's loading skeleton + not-found alert if either
+   * happens to be on the page when the user invokes the browser
+   * print dialog (rare; the user would be reacting to an error
+   * state). The receipt-display element drives the print contract;
+   * everything else is silenced above.
+   */
+  [data-testid="receipt-loading"],
+  [data-testid="receipt-not-found"] {
+    display: none;
+  }
+}

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 160" role="img" aria-label="Apostle Paul Memorial Park wordmark">
+  <title>Apostle Paul Memorial Park</title>
+  <!-- Cormorant Garamond, wide ceremonial tracking, emerald.
+       SVG text is the safest delivery — the consumer's CSS may rasterise
+       a different fallback than the running app, but the wordmark must
+       read as the brand regardless. -->
+  <g font-family="'Cormorant Garamond', 'Adobe Caslon Pro', Georgia, serif" fill="#1D5C4D" text-anchor="middle">
+    <text x="300" y="70" font-size="46" font-weight="400" letter-spacing="14">APOSTLE PAUL</text>
+    <text x="300" y="118" font-size="28" font-weight="400" letter-spacing="10">MEMORIAL PARK</text>
+  </g>
+  <!-- Rationed gold hairline beneath the wordmark -->
+  <line x1="180" y1="140" x2="420" y2="140" stroke="#C9A96B" stroke-width="1"/>
+</svg>

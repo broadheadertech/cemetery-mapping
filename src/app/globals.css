@@ -1,0 +1,194 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  Story 1.4 Visual Foundation Lock — Apostle Paul Memorial Park brand
+  application (Tier 1 visual theming).
+
+  Tokens that change between themes live as CSS custom properties on
+  :root so they cascade everywhere. Outdoor mode is activated by the
+  `data-theme="outdoor"` attribute on <html> (set synchronously by the
+  FOUC-prevention script in src/app/layout.tsx).
+
+  We deliberately use CSS variables rather than a React className
+  toggle so the theme can resolve BEFORE hydration and so the
+  reduced-motion / prefers-contrast media queries apply without JS.
+
+  Font wiring:
+    - Cormorant Garamond (display serif) — `--font-cormorant` —
+      headings, wordmark, ceremonial copy.
+    - Manrope (body sans) — `--font-manrope` — body, wayfinding,
+      operational text.
+    - JetBrains Mono — `--font-jetbrains-mono` — codes, tabular
+      numerics, eyebrows.
+
+  Gold is RATIONED: hairlines, monogram inlay, masthead dividers only.
+  Never as fill or focus ring.
+*/
+
+:root {
+  /* Font-stack fallbacks — `next/font/google` will overwrite these on
+     the <html> element via the CSS variable on `<html class>`. The
+     literal stacks below are the SSR / FOUC-bootstrap defaults. */
+  --font-cormorant: "Cormorant Garamond", "Adobe Caslon Pro", Georgia, serif;
+  --font-manrope: "Manrope", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-jetbrains-mono: "JetBrains Mono", "Courier New", ui-monospace, monospace;
+
+  /* Theme-swappable surface tokens. Brand / indoor defaults. */
+  --page-bg: #F6F2EA; /* Ivory — the institution's environment */
+  --text-base: #2A2925; /* Ink — never pure black */
+  --shadow-card: 0 1px 2px 0 rgb(29 92 77 / 0.06);
+  --focus-ring-color: #1D5C4D; /* Emerald — gold is rationed and never used for focus */
+  --focus-ring-width: 2px;
+
+  /* StatusPill border swap target. 0 in indoor, 2px in outdoor —
+     the pill renders `border-[length:var(--pill-border-width)]` so
+     the border thickness flips without a re-render. */
+  --pill-border-width: 0px;
+
+  /* ReactiveHighlight flash colour — sourced from Tailwind's
+     `flash` token so designers can retune both sites at once. */
+  --color-flash: #fffbeb; /* amber-50 */
+
+  /* Brand ceremonial gradient — reproduces the brand-guide cover
+     treatment (Ivory at centre → Ivory-deep at edges). Used by the
+     public (login) layout and the customer-portal sign-in surface.
+     Outdoor mode overrides to a flat pure-white surface. */
+  --brand-cover-gradient:
+    radial-gradient(ellipse at center, #F6F2EA 0%, #EDE7DA 100%);
+}
+
+/*
+  Explicit outdoor mode — user toggle stored in localStorage and
+  applied synchronously by the FOUC-prevention bootstrap script.
+  Outdoor mode coexists with brand mode (uses pure white / pure black
+  for max-contrast accessibility under noon glare).
+*/
+:root[data-theme="outdoor"] {
+  --page-bg: #ffffff;
+  --text-base: #000000;
+  --shadow-card: none;
+  --focus-ring-color: #facc15; /* yellow-400 — outdoor only */
+  --focus-ring-width: 4px;
+  --pill-border-width: 2px;
+  --brand-cover-gradient: none;
+}
+
+/*
+  OS-level high-contrast preference. We honour it UNLESS the user has
+  explicitly chosen indoor mode via the toggle — `:not([data-theme="indoor"])`
+  covers both "no preference set" (default = outdoor when OS asks) and
+  "outdoor explicitly set".
+*/
+@media (prefers-contrast: more) {
+  :root:not([data-theme="indoor"]) {
+    --page-bg: #ffffff;
+    --text-base: #000000;
+    --shadow-card: none;
+    --focus-ring-color: #facc15;
+    --focus-ring-width: 4px;
+    --pill-border-width: 2px;
+    --brand-cover-gradient: none;
+  }
+}
+
+html {
+  font-family: var(--font-manrope);
+}
+
+body {
+  background: var(--page-bg);
+  color: var(--text-base);
+  min-height: 100vh;
+}
+
+/* Display utility — Cormorant Garamond for headings + ceremonial copy. */
+.font-display {
+  font-family: var(--font-cormorant);
+}
+
+/*
+  Ceremonial surface — radial ivory gradient that reproduces the
+  brand-guide cover treatment. Used on login surfaces (staff + customer
+  portal). Falls back to a flat `--page-bg` when the variable resolves
+  to `none` (outdoor + prefers-contrast).
+*/
+.bg-brand-cover {
+  background: var(--brand-cover-gradient, var(--page-bg));
+}
+
+/* Tabular numerics utility — money / IDs / dates / phone numbers. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+  ReactiveHighlight animation. Triggered by re-keying the span so the
+  animation restarts on every `watch` change. Duration is parameterised
+  via the inline `--flash-duration` variable on the element itself.
+*/
+@keyframes flash-fade {
+  0% {
+    background-color: var(--color-flash);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.animate-flash-fade {
+  animation: flash-fade var(--flash-duration, 600ms) ease-out forwards;
+}
+
+/*
+  Reduced-motion suppression. Global rule per UX-DR; ReactiveHighlight
+  and StatusPill consume this without per-component checks.
+*/
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/*
+  Phase 3D Map — projected section labels.
+
+  These float over the WebGL canvas at coordinates computed each frame by
+  Three.js, so they are appended to the stage imperatively (no React
+  reconciler runs per frame). Styled here rather than inline because the
+  element is created via `document.createElement`. Raw hex is permitted in
+  globals.css (per tailwind.config.ts: "no raw hex outside this file +
+  globals.css"); these mirror the brand emerald-deep / gold-soft tokens.
+*/
+.phase3d-seclabel {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  background: rgb(20 68 55 / 0.92);
+  color: #f6f2ea;
+  border: 1px solid rgb(201 169 107 / 0.5);
+  border-radius: 99px;
+  padding: 5px 13px;
+  white-space: nowrap;
+  box-shadow: 0 4px 14px rgb(31 30 27 / 0.22);
+  transition: opacity 0.2s;
+  z-index: 5;
+}
+.phase3d-seclabel .sn {
+  font-family: var(--font-cormorant), Georgia, serif;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+.phase3d-seclabel .sc {
+  font-family: var(--font-jetbrains-mono), monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  color: #d4bc85;
+  margin-left: 7px;
+}

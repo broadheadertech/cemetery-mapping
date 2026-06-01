@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 535" role="img" aria-label="Apostle Paul Memorial Park — dove within laurel">
+  <title>Apostle Paul Memorial Park</title>
+  <desc>A dove sits centred within an open laurel wreath. The wreath stems cross at the base over a small gold diamond inlay. The wreath opens at the crown.</desc>
+  <g fill="none" stroke="#1D5C4D" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Left laurel branch -->
+    <path d="M210 470 Q120 410 90 320 Q70 220 130 150 Q180 100 250 110"/>
+    <!-- Left laurel leaves -->
+    <path d="M125 360 q-22 -8 -32 -28 q18 -6 34 6 z" fill="#1D5C4D"/>
+    <path d="M100 290 q-22 -2 -34 -22 q18 -10 36 2 z" fill="#1D5C4D"/>
+    <path d="M100 230 q-20 -10 -22 -32 q20 -2 32 16 z" fill="#1D5C4D"/>
+    <path d="M120 170 q-14 -16 -8 -36 q20 6 24 28 z" fill="#1D5C4D"/>
+    <path d="M170 130 q-6 -20 8 -34 q16 14 10 34 z" fill="#1D5C4D"/>
+    <path d="M222 116 q4 -20 24 -28 q8 18 -6 32 z" fill="#1D5C4D"/>
+    <!-- Right laurel branch (mirror) -->
+    <path d="M390 470 Q480 410 510 320 Q530 220 470 150 Q420 100 350 110"/>
+    <!-- Right laurel leaves -->
+    <path d="M475 360 q22 -8 32 -28 q-18 -6 -34 6 z" fill="#1D5C4D"/>
+    <path d="M500 290 q22 -2 34 -22 q-18 -10 -36 2 z" fill="#1D5C4D"/>
+    <path d="M500 230 q20 -10 22 -32 q-20 -2 -32 16 z" fill="#1D5C4D"/>
+    <path d="M480 170 q14 -16 8 -36 q-20 6 -24 28 z" fill="#1D5C4D"/>
+    <path d="M430 130 q6 -20 -8 -34 q-16 14 -10 34 z" fill="#1D5C4D"/>
+    <path d="M378 116 q-4 -20 -24 -28 q-8 18 6 32 z" fill="#1D5C4D"/>
+  </g>
+  <!-- Gold diamond inlay where the laurel stems cross at the base -->
+  <path d="M285 470 L300 452 L315 470 L300 488 Z" fill="#C9A96B"/>
+  <!-- Subtle gold hairline beneath the inlay (the rationed accent) -->
+  <line x1="240" y1="500" x2="360" y2="500" stroke="#C9A96B" stroke-width="1"/>
+  <!-- Dove silhouette — body -->
+  <path d="M300 200 Q255 215 240 260 Q230 305 270 325 Q300 340 335 322 Q360 308 365 280 Q368 240 340 218 Q322 206 300 200 Z" fill="#1D5C4D"/>
+  <!-- Dove head + eye highlight -->
+  <circle cx="345" cy="225" r="14" fill="#1D5C4D"/>
+  <circle cx="350" cy="222" r="2" fill="#F6F2EA"/>
+  <!-- Dove beak -->
+  <path d="M360 226 L376 230 L358 234 Z" fill="#C9A96B"/>
+  <!-- Dove wing (raised) -->
+  <path d="M286 222 Q272 244 280 282 Q294 308 322 308 Q310 286 304 260 Q298 234 286 222 Z" fill="#144437"/>
+  <!-- Dove tail -->
+  <path d="M268 308 L228 348 L260 332 L240 358 L276 332 Z" fill="#1D5C4D"/>
+  <!-- Olive branch in beak (small gold) -->
+  <path d="M376 230 q12 -4 22 -14 q-12 -2 -22 6 z" fill="#C9A96B"/>
+</svg>

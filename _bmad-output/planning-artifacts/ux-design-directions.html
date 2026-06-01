@@ -1,0 +1,594 @@
+<!doctype html>
+<html lang="en-PH">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cemetery-mapping — UX Design Direction</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root { --motion-fade: 600ms ease-out; }
+  body { font-family: 'Inter', system-ui, -apple-system, sans-serif; font-feature-settings: 'cv11', 'cv02'; }
+  .tabular { font-variant-numeric: tabular-nums; }
+  .flash { animation: flash 600ms ease-out; }
+  @keyframes flash {
+    0% { background-color: #fef3c7; }
+    100% { background-color: transparent; }
+  }
+  .shimmer {
+    background: linear-gradient(90deg, #f1f5f9 0%, #e2e8f0 50%, #f1f5f9 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.4s linear infinite;
+  }
+  @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+  @media (prefers-reduced-motion: reduce) { .flash, .shimmer { animation: none; } }
+
+  /* Outdoor mode overrides */
+  [data-theme="outdoor"] { background: #fff !important; }
+  [data-theme="outdoor"] .surface-muted { background: #fff !important; }
+  [data-theme="outdoor"] body, [data-theme="outdoor"] .text-slate-900 { color: #000 !important; }
+  [data-theme="outdoor"] .pill { border-width: 2px !important; }
+  [data-theme="outdoor"] .btn-primary { background: #000 !important; color: #fff !important; }
+  [data-theme="outdoor"] .btn-secondary { background: #fff !important; color: #000 !important; border: 2px solid #000 !important; }
+  [data-theme="outdoor"] *:focus-visible { outline: 4px solid #facc15 !important; outline-offset: 2px !important; }
+  [data-theme="outdoor"] .shadow-sm, [data-theme="outdoor"] .shadow-md { box-shadow: none !important; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-900 antialiased">
+<!-- =============================================================== -->
+<!-- DOC HEADER -->
+<!-- =============================================================== -->
+<header class="border-b border-slate-200 bg-white">
+  <div class="max-w-7xl mx-auto px-6 py-5 flex items-center justify-between">
+    <div>
+      <h1 class="text-2xl font-bold tracking-tight">cemetery-mapping — UX Design Direction</h1>
+      <p class="text-sm text-slate-500 mt-1">Single direction: <strong>Calm Reactive</strong> · Linear + Stripe inspired · subdued, dense, quietly competent</p>
+    </div>
+    <div class="flex items-center gap-3">
+      <button id="themeToggle" class="text-sm px-3 py-2 rounded-md border border-slate-300 hover:bg-slate-50 min-h-[44px]">
+        <span data-mode-label>☀ Outdoor mode</span>
+      </button>
+      <button id="flashDemo" class="text-sm px-3 py-2 rounded-md bg-slate-800 text-white hover:bg-slate-900 btn-primary min-h-[44px]">
+        Trigger reactive flash
+      </button>
+    </div>
+  </div>
+  <div class="max-w-7xl mx-auto px-6 pb-4 text-xs text-slate-500">
+    Scroll through six key screens demonstrating the chosen direction. Toggle Outdoor mode to see the high-contrast (NFR-A5) treatment. Click "Trigger reactive flash" to see the 600ms amber-fade pattern that all reactive updates use.
+  </div>
+</header>
+
+<main class="surface-muted min-h-screen pb-24">
+<div class="max-w-7xl mx-auto px-6 py-10 space-y-16">
+
+  <!-- =========================================================== -->
+  <!-- STATUS PILL SWATCH PALETTE -->
+  <!-- =========================================================== -->
+  <section>
+    <h2 class="text-xl font-semibold mb-1">Status pill swatches</h2>
+    <p class="text-sm text-slate-500 mb-5">The product's primary visual element. Color + icon + label always (NFR-A2). Three sizes (16/24/32 px) — shown at the middle size below.</p>
+    <div class="bg-white border border-slate-200 rounded-md p-6 shadow-sm">
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3 tabular">
+        <!-- Lot statuses -->
+        <span class="pill inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-900 border border-emerald-200">
+          <span class="text-emerald-600" aria-hidden="true">✓</span> Available
+        </span>
+        <span class="pill inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-900 border border-amber-200">
+          <span class="text-amber-600" aria-hidden="true">⏱</span> Reserved
+        </span>
+        <span class="pill inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200">
+          <span class="text-slate-600" aria-hidden="true">⊘</span> Sold
+        </span>
+        <span class="pill inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-stone-100 text-stone-800 border border-stone-300">
+          <span class="text-stone-700" aria-hidden="true">◉</span> Occupied
+        </span>
+        <span class="pill inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-zinc-100 text-zinc-600 border border-zinc-200">
+          <span class="text-zinc-500" aria-hidden="true">✕</span> Cancelled
+        </span>
+        <span class="pill inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-red-50 text-red-900 border border-red-200">
+          <span class="text-red-600" aria-hidden="true">⚠</span> Defaulted
+        </span>
+        <span class="pill inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-indigo-50 text-indigo-900 border border-indigo-200">
+          <span class="text-indigo-600" aria-hidden="true">➔</span> Transferred
+        </span>
+        <span class="pill inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-900 border border-amber-200">
+          <span class="text-amber-600" aria-hidden="true">⏱</span> Overdue-with-action
+        </span>
+      </div>
+    </div>
+  </section>
+
+  <!-- =========================================================== -->
+  <!-- SCREEN 1: Maria's payment form (defining experience) -->
+  <!-- =========================================================== -->
+  <section>
+    <h2 class="text-xl font-semibold mb-1">Screen 1 — Record Payment (Maria, desktop)</h2>
+    <p class="text-sm text-slate-500 mb-5">The defining experience: keyboard-first form, inline allocation preview, peso-prefixed tabular numerics, no modal interruptions.</p>
+    <div class="bg-white border border-slate-200 rounded-md p-8 shadow-sm">
+      <header class="mb-6 flex items-baseline justify-between">
+        <div>
+          <h3 class="text-2xl font-bold">Record Payment</h3>
+          <p class="text-sm text-slate-500 mt-1 tabular">Mrs. Maria Cruz · Contract #2024-118 · Family lot D-5</p>
+        </div>
+        <span class="pill inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-900 border border-emerald-200">
+          <span class="text-emerald-600" aria-hidden="true">●</span> Contract active
+        </span>
+      </header>
+
+      <div class="grid grid-cols-3 gap-4 mb-6">
+        <div>
+          <label class="block text-xs font-medium text-slate-700 mb-1.5">Amount</label>
+          <div class="relative">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">₱</span>
+            <input class="w-full pl-7 pr-3 py-3 border border-slate-300 rounded-md text-base tabular focus:outline-none focus:ring-2 focus:ring-slate-700 focus:border-slate-700 min-h-[44px]" value="4,000.00" />
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-700 mb-1.5">Method</label>
+          <select class="w-full px-3 py-3 border border-slate-300 rounded-md text-base focus:outline-none focus:ring-2 focus:ring-slate-700 min-h-[44px]">
+            <option>Cash</option><option>Check</option><option>Bank transfer</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-700 mb-1.5">Date</label>
+          <input class="w-full px-3 py-3 border border-slate-300 rounded-md text-base focus:outline-none focus:ring-2 focus:ring-slate-700 min-h-[44px]" value="17 May 2026" />
+        </div>
+      </div>
+
+      <div class="mb-6">
+        <label class="block text-xs font-medium text-slate-700 mb-1.5">Reference (optional)</label>
+        <input class="w-full px-3 py-3 border border-slate-300 rounded-md text-base text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-700 min-h-[44px]" placeholder="e.g. check number, receipt photo description" />
+      </div>
+
+      <div class="border-t border-slate-200 pt-5">
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-sm font-medium text-slate-900">Allocation preview</span>
+          <button class="text-sm text-slate-700 underline hover:text-slate-900">Allocate manually</button>
+        </div>
+        <div class="space-y-2 tabular text-sm">
+          <div class="flex items-center justify-between py-2 px-3 rounded bg-slate-50">
+            <div class="flex items-center gap-2">
+              <span class="pill inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-900 border border-red-200">
+                <span class="text-red-600" aria-hidden="true">⚠</span> Overdue
+              </span>
+              <span class="text-slate-900">Installment #3</span>
+              <span class="text-slate-500 text-xs">Due 15 Mar 2026</span>
+            </div>
+            <div class="flex items-center gap-3">
+              <span class="text-slate-900">₱ 4,000.00</span>
+              <span class="text-xs text-slate-500">Will be paid</span>
+            </div>
+          </div>
+          <div class="flex items-center justify-between py-2 px-3 rounded text-slate-500">
+            <div class="flex items-center gap-2">
+              <span class="pill inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-900 border border-amber-200">
+                <span class="text-amber-600" aria-hidden="true">•</span> Due
+              </span>
+              <span>Installment #4</span>
+              <span class="text-xs">Due 15 Apr 2026</span>
+            </div>
+            <span class="tabular">₱ 4,000.00</span>
+          </div>
+        </div>
+        <div class="mt-4 flex items-center justify-between pt-4 border-t border-slate-200">
+          <span class="text-sm font-medium text-slate-900">Total amount applied</span>
+          <span class="text-base font-semibold tabular">₱ 4,000.00</span>
+        </div>
+      </div>
+
+      <div class="mt-8 flex items-center justify-end gap-3">
+        <button class="btn-secondary px-5 py-2.5 rounded-md border border-slate-300 text-slate-900 hover:bg-slate-50 min-h-[44px]">Cancel</button>
+        <button class="btn-primary px-5 py-2.5 rounded-md bg-slate-800 text-white hover:bg-slate-900 min-h-[44px]">Review receipt →</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- =========================================================== -->
+  <!-- SCREEN 2: Receipt preview modal -->
+  <!-- =========================================================== -->
+  <section>
+    <h2 class="text-xl font-semibold mb-1">Screen 2 — Receipt Preview Modal</h2>
+    <p class="text-sm text-slate-500 mb-5">The "deliberate pause" — Maria sees the actual document she's about to commit, not a generic confirmation dialog.</p>
+    <div class="bg-slate-900/50 rounded-md p-8 flex items-center justify-center">
+      <div class="bg-white border border-slate-200 rounded-md w-full max-w-2xl shadow-md">
+        <div class="border-b border-slate-200 px-6 py-4 flex items-center justify-between">
+          <h3 class="text-lg font-semibold">Review receipt before issuing</h3>
+          <button class="text-slate-500 hover:text-slate-900 min-h-[44px] min-w-[44px] rounded-md flex items-center justify-center" aria-label="Close">✕</button>
+        </div>
+        <div class="px-6 py-6">
+          <!-- Receipt PDF preview (rendered as static HTML mock) -->
+          <div class="border border-slate-300 rounded p-6 bg-slate-50 font-mono text-sm tabular">
+            <div class="text-center text-lg font-bold tracking-wider">BROADHEADER MEMORIAL PARK</div>
+            <div class="text-center text-xs text-slate-500 mt-1">TIN 123-456-789-000 · BIR ATP #001234 · Quezon City, PH</div>
+            <div class="text-center text-base font-semibold mt-4">OFFICIAL RECEIPT</div>
+            <div class="grid grid-cols-2 gap-3 mt-4 text-xs">
+              <div><span class="text-slate-500">Serial:</span> 0001234 <span class="text-slate-400">(next)</span></div>
+              <div><span class="text-slate-500">Date:</span> 17 May 2026</div>
+              <div class="col-span-2"><span class="text-slate-500">Customer:</span> Mrs. Maria Cruz</div>
+            </div>
+            <div class="mt-4 pt-3 border-t border-dashed border-slate-300">
+              <div class="text-xs text-slate-500 mb-1">Payment received:</div>
+              <div class="flex justify-between"><span>Installment #3 (overdue)</span><span>₱ 4,000.00</span></div>
+            </div>
+            <div class="mt-4 pt-3 border-t border-slate-300 flex justify-between font-semibold">
+              <span>Total</span><span>₱ 4,000.00</span>
+            </div>
+            <div class="text-xs mt-1 text-slate-500 flex justify-between">
+              <span>Method: Cash</span>
+              <span>VAT inclusive (12%)</span>
+            </div>
+          </div>
+          <p class="text-xs text-slate-500 mt-4">Once generated, this receipt cannot be edited. Voids must be recorded separately and consume the serial number.</p>
+        </div>
+        <div class="border-t border-slate-200 px-6 py-4 flex items-center justify-end gap-3">
+          <button class="btn-secondary px-5 py-2.5 rounded-md border border-slate-300 hover:bg-slate-50 min-h-[44px]">Cancel</button>
+          <button class="btn-primary px-5 py-2.5 rounded-md bg-slate-800 text-white hover:bg-slate-900 min-h-[44px]">Generate &amp; Print</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- =========================================================== -->
+  <!-- SCREEN 3: Mr. Reyes's mobile dashboard -->
+  <!-- =========================================================== -->
+  <section>
+    <h2 class="text-xl font-semibold mb-1">Screen 3 — Owner Dashboard (Mr. Reyes, mobile)</h2>
+    <p class="text-sm text-slate-500 mb-5">Glanceable KPI tiles. Mid-day glance, ~90 seconds. Reactive updates fade in with amber highlight. AR aging contextualized with "with logged action" vs "silently overdue."</p>
+
+    <div class="flex justify-center">
+      <div class="w-[420px] bg-white border border-slate-200 rounded-2xl shadow-md overflow-hidden">
+        <!-- Mobile chrome -->
+        <div class="px-5 py-4 flex items-center justify-between bg-slate-50 border-b border-slate-200">
+          <div>
+            <div class="text-base font-semibold">Dashboard</div>
+            <div class="text-xs text-slate-500">May 2026 · MTD</div>
+          </div>
+          <button class="min-h-[44px] min-w-[44px] flex items-center justify-center text-slate-500" aria-label="Search">🔍</button>
+        </div>
+        <!-- KPI tiles grid -->
+        <div class="p-4 grid grid-cols-2 gap-3">
+          <!-- Sales -->
+          <div class="border border-slate-200 rounded-lg p-3" id="kpi-sales">
+            <div class="text-xs text-slate-500">Sales MTD</div>
+            <div class="text-2xl font-bold tabular mt-1">₱340,000</div>
+            <div class="text-xs text-emerald-700 mt-1 tabular">+₱16,000 today</div>
+          </div>
+          <!-- Collections -->
+          <div class="border border-slate-200 rounded-lg p-3">
+            <div class="text-xs text-slate-500">Collections MTD</div>
+            <div class="text-2xl font-bold tabular mt-1">₱280,000</div>
+            <div class="text-xs text-emerald-700 mt-1 tabular">+₱4,000 today</div>
+          </div>
+          <!-- AR Balance -->
+          <div class="border border-slate-200 rounded-lg p-3">
+            <div class="text-xs text-slate-500">AR Balance</div>
+            <div class="text-2xl font-bold tabular mt-1">₱1.8M</div>
+            <div class="text-xs text-slate-500 mt-1">Across 247 contracts</div>
+          </div>
+          <!-- Net -->
+          <div class="border border-slate-200 rounded-lg p-3">
+            <div class="text-xs text-slate-500">Net MTD</div>
+            <div class="text-2xl font-bold tabular mt-1 text-emerald-700">+₱245,000</div>
+            <div class="text-xs text-slate-500 mt-1 tabular">Expenses ₱95,000</div>
+          </div>
+        </div>
+        <!-- AR aging -->
+        <div class="px-4 pb-4">
+          <div class="border border-slate-200 rounded-lg overflow-hidden">
+            <div class="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-700">AR Aging</div>
+            <div class="divide-y divide-slate-200 text-sm tabular">
+              <div class="px-3 py-2 flex items-center justify-between">
+                <span class="text-slate-700">Current</span>
+                <span class="text-slate-900">₱1.08M <span class="text-xs text-slate-500">(60%)</span></span>
+              </div>
+              <div class="px-3 py-2 flex items-center justify-between">
+                <span class="text-slate-700">30 days</span>
+                <span class="text-slate-900">₱450k <span class="text-xs text-slate-500">(25%)</span></span>
+              </div>
+              <div class="px-3 py-2 flex items-center justify-between bg-amber-50">
+                <span class="text-amber-900">60 days</span>
+                <span class="text-amber-900">₱180k <span class="text-xs text-amber-700">(10%)</span></span>
+              </div>
+              <div class="px-3 py-2 flex items-center justify-between bg-red-50">
+                <span class="flex items-center gap-1.5 text-red-900">
+                  <span class="text-red-600" aria-hidden="true">⚠</span> 90+ days
+                </span>
+                <div class="text-right">
+                  <div class="text-red-900">₱90k <span class="text-xs text-red-700">(5%)</span></div>
+                  <div class="text-xs text-amber-700">3 of 7 have logged follow-up</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- =========================================================== -->
+  <!-- SCREEN 4: Lot detail with section overlay -->
+  <!-- =========================================================== -->
+  <section>
+    <h2 class="text-xl font-semibold mb-1">Screen 4 — Lot Detail (desktop, Phase 1 SVG map)</h2>
+    <p class="text-sm text-slate-500 mb-5">Visual confirmation of search-found lot. Status pill + occupant + contract preview, all in one viewport. Phase 2 swaps the SVG for Leaflet without changing this layout.</p>
+    <div class="bg-white border border-slate-200 rounded-md shadow-sm overflow-hidden">
+      <div class="grid grid-cols-5">
+        <!-- Map area -->
+        <div class="col-span-3 p-6 bg-slate-50 border-r border-slate-200 min-h-[400px] relative">
+          <div class="text-xs text-slate-500 mb-3 tabular">Section D · Block 5</div>
+          <!-- Faux SVG grid -->
+          <svg viewBox="0 0 200 160" class="w-full h-auto">
+            <!-- Lots in section -->
+            <g fill="#10b981" fill-opacity="0.15" stroke="#059669" stroke-width="0.5">
+              <rect x="10" y="20" width="25" height="20" /><rect x="45" y="20" width="25" height="20" />
+              <rect x="80" y="20" width="25" height="20" /><rect x="115" y="20" width="25" height="20" />
+              <rect x="10" y="50" width="25" height="20" /><rect x="45" y="50" width="25" height="20" />
+              <rect x="80" y="50" width="25" height="20" /><rect x="115" y="50" width="25" height="20" />
+              <rect x="10" y="80" width="25" height="20" /><rect x="45" y="80" width="25" height="20" />
+              <rect x="115" y="80" width="25" height="20" />
+            </g>
+            <!-- Sold (slate) -->
+            <g fill="#64748b" fill-opacity="0.3" stroke="#475569" stroke-width="0.5">
+              <rect x="80" y="80" width="25" height="20" />
+            </g>
+            <!-- Selected lot (highlighted) -->
+            <g fill="#1e293b" fill-opacity="0.85" stroke="#0f172a" stroke-width="1">
+              <rect x="45" y="50" width="25" height="20" />
+            </g>
+            <text x="57.5" y="63" fill="white" font-size="6" text-anchor="middle" font-weight="bold">D-5</text>
+            <!-- Path indicator -->
+            <line x1="57.5" y1="70" x2="57.5" y2="100" stroke="#1e293b" stroke-width="0.7" stroke-dasharray="2,1"/>
+            <text x="57.5" y="115" fill="#475569" font-size="5" text-anchor="middle">section path</text>
+          </svg>
+        </div>
+        <!-- Detail panel -->
+        <div class="col-span-2 p-6 space-y-5">
+          <div>
+            <div class="flex items-baseline justify-between">
+              <h3 class="text-2xl font-bold">D-5-12</h3>
+              <span class="pill inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200">
+                <span class="text-slate-600" aria-hidden="true">⊘</span> Sold
+              </span>
+            </div>
+            <p class="text-sm text-slate-500 mt-1">Family lot · 2.0 × 2.5 m</p>
+          </div>
+          <div class="text-sm space-y-1.5">
+            <div class="flex justify-between"><span class="text-slate-500">Base price</span><span class="tabular">₱80,000.00</span></div>
+            <div class="flex justify-between"><span class="text-slate-500">Owner since</span><span>15 Mar 2024</span></div>
+          </div>
+          <div class="border-t border-slate-200 pt-4">
+            <div class="text-xs font-medium text-slate-700 mb-2">Current owner</div>
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-sm font-medium text-slate-700">MC</div>
+              <div>
+                <div class="text-sm font-medium">Mrs. Maria Cruz</div>
+                <div class="text-xs text-slate-500 tabular">+63 917 555 0142</div>
+              </div>
+            </div>
+          </div>
+          <div class="border-t border-slate-200 pt-4">
+            <div class="text-xs font-medium text-slate-700 mb-2">Active contract</div>
+            <div class="bg-slate-50 rounded-md p-3 text-sm">
+              <div class="flex justify-between mb-1">
+                <span class="font-medium">Contract #2024-118</span>
+                <span class="pill inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-900 border border-emerald-200">
+                  <span class="text-emerald-600" aria-hidden="true">●</span> Active
+                </span>
+              </div>
+              <div class="text-xs text-slate-500 tabular">Balance ₱48,000 · 14 of 24 installments to go</div>
+            </div>
+          </div>
+          <button class="w-full btn-primary px-5 py-3 rounded-md bg-slate-800 text-white hover:bg-slate-900 min-h-[44px]">Record Payment</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- =========================================================== -->
+  <!-- SCREEN 5: AR Aging Table -->
+  <!-- =========================================================== -->
+  <section>
+    <h2 class="text-xl font-semibold mb-1">Screen 5 — AR Aging Detail (admin drill-down)</h2>
+    <p class="text-sm text-slate-500 mb-5">The "Overdue vs Overdue-with-action" distinction visible at row level — Mr. Reyes sees risk vs handled-risk without drilling further.</p>
+    <div class="bg-white border border-slate-200 rounded-md shadow-sm overflow-hidden">
+      <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
+        <div>
+          <h3 class="text-lg font-semibold">90+ Days Overdue</h3>
+          <p class="text-sm text-slate-500 mt-0.5 tabular">7 contracts · ₱90,000 outstanding</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button class="text-sm px-3 py-2 rounded-md border border-slate-300 hover:bg-slate-50 min-h-[44px]">Filter</button>
+          <button class="text-sm px-3 py-2 rounded-md border border-slate-300 hover:bg-slate-50 min-h-[44px]">Export</button>
+        </div>
+      </div>
+      <table class="w-full text-sm tabular">
+        <thead class="bg-slate-50 text-xs font-medium text-slate-700">
+          <tr>
+            <th class="text-left px-6 py-2.5">Contract</th>
+            <th class="text-left px-6 py-2.5">Customer</th>
+            <th class="text-right px-6 py-2.5">Overdue</th>
+            <th class="text-right px-6 py-2.5">Last payment</th>
+            <th class="text-left px-6 py-2.5">Status</th>
+            <th class="px-6 py-2.5"></th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-200">
+          <tr class="hover:bg-slate-50">
+            <td class="px-6 py-3 font-medium">#2024-091</td>
+            <td class="px-6 py-3">Aling Nena S.</td>
+            <td class="px-6 py-3 text-right">₱12,000</td>
+            <td class="px-6 py-3 text-right text-slate-500">14 Feb 2026</td>
+            <td class="px-6 py-3">
+              <span class="pill inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-900 border border-amber-200">
+                <span class="text-amber-600" aria-hidden="true">⏱</span> Action: settle by Dec 15
+              </span>
+            </td>
+            <td class="px-6 py-3 text-right">
+              <button class="text-sm text-slate-700 underline hover:text-slate-900">Open</button>
+            </td>
+          </tr>
+          <tr class="hover:bg-slate-50">
+            <td class="px-6 py-3 font-medium">#2023-044</td>
+            <td class="px-6 py-3">P. Bautista</td>
+            <td class="px-6 py-3 text-right">₱18,000</td>
+            <td class="px-6 py-3 text-right text-slate-500">02 Jan 2026</td>
+            <td class="px-6 py-3">
+              <span class="pill inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-900 border border-amber-200">
+                <span class="text-amber-600" aria-hidden="true">⏱</span> Action: hospitalized
+              </span>
+            </td>
+            <td class="px-6 py-3 text-right">
+              <button class="text-sm text-slate-700 underline hover:text-slate-900">Open</button>
+            </td>
+          </tr>
+          <tr class="hover:bg-slate-50 bg-red-50/30">
+            <td class="px-6 py-3 font-medium">#2024-007</td>
+            <td class="px-6 py-3">R. Mendoza</td>
+            <td class="px-6 py-3 text-right text-red-900 font-medium">₱15,000</td>
+            <td class="px-6 py-3 text-right text-slate-500">17 Dec 2025</td>
+            <td class="px-6 py-3">
+              <span class="pill inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-900 border border-red-200">
+                <span class="text-red-600" aria-hidden="true">⚠</span> No logged action
+              </span>
+            </td>
+            <td class="px-6 py-3 text-right">
+              <button class="text-sm text-slate-700 underline hover:text-slate-900">Open</button>
+            </td>
+          </tr>
+          <tr class="hover:bg-slate-50 bg-red-50/30">
+            <td class="px-6 py-3 font-medium">#2023-188</td>
+            <td class="px-6 py-3">J. Reyes</td>
+            <td class="px-6 py-3 text-right text-red-900 font-medium">₱24,000</td>
+            <td class="px-6 py-3 text-right text-slate-500">11 Nov 2025</td>
+            <td class="px-6 py-3">
+              <span class="pill inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-900 border border-red-200">
+                <span class="text-red-600" aria-hidden="true">⚠</span> No logged action
+              </span>
+            </td>
+            <td class="px-6 py-3 text-right">
+              <button class="text-sm text-slate-700 underline hover:text-slate-900">Open</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="text-xs text-slate-500 mt-3">Rows with red tint = need follow-up action. Rows with amber pill = follow-up logged. Mr. Reyes sees four items needing his attention, not seven.</p>
+  </section>
+
+  <!-- =========================================================== -->
+  <!-- SCREEN 6: Field worker mobile lookup -->
+  <!-- =========================================================== -->
+  <section>
+    <h2 class="text-xl font-semibold mb-1">Screen 6 — Field Worker Lot Lookup (Junior, mobile)</h2>
+    <p class="text-sm text-slate-500 mb-5">Search-first navigation. Cached-data indicator. Large touch targets (≥ 44px). Designed for gloved hands in sunlight (toggle outdoor mode to see).</p>
+    <div class="flex justify-center">
+      <div class="w-[380px] bg-white border border-slate-200 rounded-2xl shadow-md overflow-hidden">
+        <!-- Mobile chrome with offline indicator -->
+        <div class="px-4 py-3 flex items-center justify-between bg-slate-50 border-b border-slate-200">
+          <div class="flex items-center gap-2">
+            <button class="text-slate-700 min-h-[44px] min-w-[44px] flex items-center justify-center" aria-label="Back">←</button>
+            <div class="text-base font-semibold">Lot lookup</div>
+          </div>
+          <span class="pill inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-900 border border-amber-200">
+            <span class="text-amber-600" aria-hidden="true">●</span> Cached 12m ago
+          </span>
+        </div>
+        <!-- Search -->
+        <div class="p-4">
+          <div class="relative">
+            <input type="search" class="w-full px-4 py-3 pr-10 border border-slate-300 rounded-md text-base focus:outline-none focus:ring-2 focus:ring-slate-700 min-h-[44px]" value="Bautista" />
+            <button class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 min-h-[44px] min-w-[44px] flex items-center justify-center" aria-label="Clear">✕</button>
+          </div>
+        </div>
+        <!-- Results -->
+        <div class="px-2 pb-4">
+          <div class="text-xs font-medium text-slate-700 px-2 mb-2">3 matches</div>
+          <div class="space-y-1">
+            <button class="w-full text-left p-3 rounded-md hover:bg-slate-50 border border-transparent hover:border-slate-200 min-h-[60px]">
+              <div class="flex items-baseline justify-between">
+                <div class="font-medium">P. Bautista</div>
+                <span class="pill inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-stone-100 text-stone-800 border border-stone-300">
+                  <span class="text-stone-700" aria-hidden="true">◉</span> Occupied
+                </span>
+              </div>
+              <div class="text-sm text-slate-500 tabular mt-0.5">Lot E-12-04 · Family lot · Sold 2019</div>
+            </button>
+            <button class="w-full text-left p-3 rounded-md hover:bg-slate-50 border border-transparent hover:border-slate-200 min-h-[60px]">
+              <div class="flex items-baseline justify-between">
+                <div class="font-medium">R. Bautista-Cruz</div>
+                <span class="pill inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200">
+                  <span class="text-slate-600" aria-hidden="true">⊘</span> Sold
+                </span>
+              </div>
+              <div class="text-sm text-slate-500 tabular mt-0.5">Lot K-8-22 · Single · Sold 2022</div>
+            </button>
+            <button class="w-full text-left p-3 rounded-md hover:bg-slate-50 border border-transparent hover:border-slate-200 min-h-[60px]">
+              <div class="flex items-baseline justify-between">
+                <div class="font-medium">M. Bautista</div>
+                <span class="pill inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-900 border border-amber-200">
+                  <span class="text-amber-600" aria-hidden="true">⏱</span> Reserved
+                </span>
+              </div>
+              <div class="text-sm text-slate-500 tabular mt-0.5">Lot A-3-15 · Single · Reserved 2026</div>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- =========================================================== -->
+  <!-- SCREEN 7: Loading skeleton -->
+  <!-- =========================================================== -->
+  <section>
+    <h2 class="text-xl font-semibold mb-1">Screen 7 — Loading state (skeleton, not spinner)</h2>
+    <p class="text-sm text-slate-500 mb-5">Skeletons match final layout density so users see structure, not absence.</p>
+    <div class="bg-white border border-slate-200 rounded-md shadow-sm p-6">
+      <div class="space-y-3">
+        <div class="h-4 w-32 shimmer rounded"></div>
+        <div class="h-8 w-64 shimmer rounded"></div>
+        <div class="grid grid-cols-4 gap-3 mt-6">
+          <div class="h-20 shimmer rounded-md"></div>
+          <div class="h-20 shimmer rounded-md"></div>
+          <div class="h-20 shimmer rounded-md"></div>
+          <div class="h-20 shimmer rounded-md"></div>
+        </div>
+        <div class="h-32 shimmer rounded-md mt-3"></div>
+      </div>
+    </div>
+  </section>
+
+</div>
+</main>
+
+<footer class="bg-white border-t border-slate-200">
+  <div class="max-w-7xl mx-auto px-6 py-6 text-xs text-slate-500">
+    Mockup file: <code>_bmad-output/planning-artifacts/ux-design-directions.html</code> · Tailwind CSS Play CDN · static HTML, no JS framework. Open in a modern browser. Toggle outdoor mode and the reactive flash button to see live behaviors.
+  </div>
+</footer>
+
+<script>
+  // Theme toggle (indoor / outdoor)
+  const toggle = document.getElementById('themeToggle');
+  const label = document.querySelector('[data-mode-label]');
+  toggle.addEventListener('click', () => {
+    const html = document.documentElement;
+    const current = html.getAttribute('data-theme');
+    if (current === 'outdoor') {
+      html.removeAttribute('data-theme');
+      label.textContent = '☀ Outdoor mode';
+    } else {
+      html.setAttribute('data-theme', 'outdoor');
+      label.textContent = '⤺ Indoor mode';
+    }
+  });
+
+  // Reactive flash demo
+  document.getElementById('flashDemo').addEventListener('click', () => {
+    const target = document.getElementById('kpi-sales');
+    target.classList.remove('flash');
+    void target.offsetWidth; // restart animation
+    target.classList.add('flash');
+  });
+</script>
+</body>
+</html>
