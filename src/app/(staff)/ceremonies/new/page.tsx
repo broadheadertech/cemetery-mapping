@@ -134,7 +134,7 @@ export default function NewCeremonyPage() {
   if (contractId.length === 0 || lotId.length === 0) {
     return (
       <div className="space-y-4">
-        <h1 className="text-3xl font-bold tracking-tight">Schedule ceremony</h1>
+        <h1 className="font-display text-4xl font-semibold tracking-tight">Schedule ceremony</h1>
         <div
           role="alert"
           className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"
@@ -156,7 +156,7 @@ export default function NewCeremonyPage() {
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <header className="space-y-1">
-        <h1 className="text-3xl font-bold tracking-tight">
+        <h1 className="font-display text-4xl font-semibold tracking-tight">
           {kind === "consecration"
             ? "Schedule consecration"
             : kind === "interment"

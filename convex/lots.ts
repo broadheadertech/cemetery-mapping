@@ -955,6 +955,81 @@ export const updateLotGeometry = internalMutationGeneric({
 });
 
 /**
+ * Public "drop a pin" geometry setter — the Map cockpit's click-to-place
+ * flow. Given a point the operator clicked on the map, place the lot
+ * there: store the point as the centroid and auto-generate a footprint
+ * rectangle sized from the lot's OWN dimensions, then mark it surveyed.
+ *
+ * This is the office-friendly counterpart to the bulk GPS import — point
+ * at the map instead of typing coordinates. admin / office_staff only
+ * (server-enforced). Emits the same geometry audit shape as
+ * `updateLotGeometry`.
+ */
+export const setLotLocation = mutationGeneric({
+  args: {
+    lotId: v.id("lots"),
+    lat: v.number(),
+    lng: v.number(),
+  },
+  handler: async (
+    ctx: MutationCtx,
+    args: { lotId: LotId; lat: number; lng: number },
+  ): Promise<void> => {
+    await requireRole(ctx, ["admin", "office_staff"]);
+
+    const point: LatLng = { lat: args.lat, lng: args.lng };
+    if (!isCoordInManilaSanityRange(point)) {
+      throwError(
+        ErrorCode.VALIDATION,
+        "That point is outside the cemetery's coordinate range — check the location.",
+        { lat: args.lat, lng: args.lng },
+      );
+    }
+
+    const before = await ctx.db.get(args.lotId);
+    if (before === null) {
+      throwError(ErrorCode.NOT_FOUND, "Lot not found.", { lotId: args.lotId });
+    }
+
+    // Footprint sized from the lot's real dimensions, centred on the
+    // clicked point. North-aligned — the centroid is the meaningful datum
+    // (drives field-worker navigation); a precise rotated outline comes
+    // from a real survey import later.
+    const metersPerDegLat = 111320;
+    const cosLat = Math.cos((point.lat * Math.PI) / 180);
+    const metersPerDegLng = 111320 * (cosLat === 0 ? 1 : cosLat);
+    const dLat = before.dimensions.depthM / 2 / metersPerDegLat;
+    const dLng = before.dimensions.widthM / 2 / metersPerDegLng;
+    const polygon: Polygon = [
+      { lat: point.lat - dLat, lng: point.lng - dLng },
+      { lat: point.lat - dLat, lng: point.lng + dLng },
+      { lat: point.lat + dLat, lng: point.lng + dLng },
+      { lat: point.lat + dLat, lng: point.lng - dLng },
+    ];
+    assertPolygonValid(polygon);
+
+    const bbox = bboxFromPolygon(polygon, point);
+    const nextGeometry: LotGeometry = { centroid: point, polygon, ...bbox };
+
+    await ctx.db.patch(args.lotId, {
+      geometry: nextGeometry,
+      geometryStatus: "surveyed",
+    });
+
+    await emitAudit(ctx, {
+      action: "update",
+      entityType: "lot",
+      entityId: args.lotId,
+      before: {
+        geometry: before.geometry,
+        geometryStatus: before.geometryStatus,
+      },
+      after: { geometry: nextGeometry, geometryStatus: "surveyed" },
+    });
+  },
+});
+
+/**
  * Internal-only lookup by lot `code` (Story 8.1).
  *
  * Story 1.8 ships a `by_code` index on `lots.code` (schema.ts §

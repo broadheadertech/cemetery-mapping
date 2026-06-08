@@ -78,6 +78,8 @@ export interface LotMapProps {
    * the geographic context regardless of survey state.
    */
   forceRenderer?: LotMapRenderer;
+  /** Fly the (Leaflet) map to this point — find-a-grave jump target. */
+  focusPoint?: { lat: number; lng: number } | null;
 }
 
 export function LotMap({
@@ -87,6 +89,7 @@ export function LotMap({
   height = 600,
   selectedLotId,
   forceRenderer,
+  focusPoint,
 }: LotMapProps) {
   // Memoise the parent-supplied initial bbox so a parent re-render
   // without a viewport change doesn't restart the debounce.
@@ -174,6 +177,7 @@ export function LotMap({
           height={height}
           selectedLotId={selectedLotId}
           onBboxChange={handleLeafletBboxChange}
+          focusPoint={focusPoint}
         />
       </LeafletErrorBoundary>
     );

@@ -120,27 +120,31 @@ export const DEFAULT_PLACEHOLDER_CENTROID: LatLng = {
 };
 
 /**
- * Manila sanity-range envelope used by `validatePolygon`. NOT the
- * cemetery boundary — a deliberately loose 0.4° × 0.2° box (≈ 44 km
- * × 22 km) around the Manila metro region. The check exists to catch
- * "the surveyor punched the coordinate in degrees-minutes-seconds and
- * got a value in the 14400-range" class of mistake, not to enforce the
- * cemetery footprint. A future story can tighten this when we know the
- * cemetery's actual GeoJSON outline.
+ * Coordinate sanity-range envelope used by `validatePolygon`. NOT the
+ * cemetery boundary — a deliberately loose box over western Luzon. The
+ * check exists to catch "the surveyor punched the coordinate in
+ * degrees-minutes-seconds and got a value in the 14400-range" class of
+ * mistake, not to enforce the cemetery footprint.
+ *
+ * The envelope spans roughly Metro Manila up through the Ilocos/La Union
+ * coast so it admits BOTH the legacy Manila placeholder centroid AND the
+ * actual cemetery — Apostle Paul Memorial Park, Aringay, La Union
+ * (≈ 16.4° N, 120.3° E). A future story can tighten this to the
+ * cemetery's real GeoJSON outline once surveyed.
  */
-const MANILA_LAT_MIN = 14.4;
-const MANILA_LAT_MAX = 14.8;
-const MANILA_LNG_MIN = 120.9;
-const MANILA_LNG_MAX = 121.1;
+const COORD_LAT_MIN = 13.5;
+const COORD_LAT_MAX = 17.0;
+const COORD_LNG_MIN = 119.5;
+const COORD_LNG_MAX = 122.0;
 
 function inManilaSanityRange(p: LatLng): boolean {
   return (
     Number.isFinite(p.lat) &&
     Number.isFinite(p.lng) &&
-    p.lat >= MANILA_LAT_MIN &&
-    p.lat <= MANILA_LAT_MAX &&
-    p.lng >= MANILA_LNG_MIN &&
-    p.lng <= MANILA_LNG_MAX
+    p.lat >= COORD_LAT_MIN &&
+    p.lat <= COORD_LAT_MAX &&
+    p.lng >= COORD_LNG_MIN &&
+    p.lng <= COORD_LNG_MAX
   );
 }
 
@@ -357,7 +361,7 @@ export function validatePolygon(polygon: Polygon): ValidatePolygonResult {
       return {
         ok: false,
         code: "INVALID_COORD",
-        details: `Vertex ${i} is outside the Manila sanity range (lat ${p.lat}, lng ${p.lng}).`,
+        details: `Vertex ${i} is outside the coordinate sanity range (lat ${p.lat}, lng ${p.lng}).`,
       };
     }
   }

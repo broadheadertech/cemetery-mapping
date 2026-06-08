@@ -17,8 +17,10 @@
  * browser-only.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useQuery } from "convex/react";
+import { makeFunctionReference } from "convex/server";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
@@ -39,6 +41,54 @@ interface LotUserData {
   price: number;
   occupant: string | null;
   block: string;
+  /** Real Convex lot id when this lot came from live inventory; null in
+   *  the procedural demo. Drives the rail's deep-links. */
+  realLotId: string | null;
+}
+
+/** Lot row read from `lots:listLots` to drive the scene from live data. */
+interface RealLotRow {
+  _id: string;
+  code: string;
+  section: string;
+  block: string;
+  row: string;
+  type: "single" | "family" | "mausoleum" | "niche";
+  basePriceCents: number;
+  status: string;
+  isRetired: boolean;
+}
+
+const listLotsRef = makeFunctionReference<
+  "query",
+  Record<string, never>,
+  RealLotRow[]
+>("lots:listLots");
+
+/** The `lots.section` names that make up Phase 1 (the Northwest Parcel). */
+const PHASE1_SECTION_NAMES: ReadonlyArray<string> = [
+  "Garden of Grace",
+  "Garden of Faith",
+  "Garden of Hope",
+];
+
+/** Map the 7-state lot lifecycle onto the 5 the 3D scene renders. */
+function to3DStatus(s: string): LotStatus {
+  if (
+    s === "available" ||
+    s === "reserved" ||
+    s === "sold" ||
+    s === "occupied" ||
+    s === "defaulted"
+  ) {
+    return s;
+  }
+  return "sold"; // cancelled / transferred → neutral stone marker
+}
+
+/** Niche lots render with the single-plot footprint. */
+function to3DType(t: RealLotRow["type"]): LotUserData["type"] {
+  return t === "family" || t === "mausoleum" ? t : "single";
 }
 
 interface SectionRollup {
@@ -123,11 +173,40 @@ export default function Phase3DMap() {
   );
   const [ready, setReady] = useState(false);
   const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isDemo, setIsDemo] = useState(false);
 
-  // ---- Build the scene once on mount. ----
+  // Live inventory for Phase 1's gardens. While the query is loading we
+  // hold the scene back; once it resolves we build from real lots, or
+  // fall back to the procedural demo when no Phase 1 lots exist yet.
+  const lotsQuery = useQuery(listLotsRef, {});
+  const realLots = useMemo<RealLotRow[] | null>(() => {
+    if (lotsQuery === undefined) return null;
+    const names = new Set(PHASE1_SECTION_NAMES);
+    return lotsQuery.filter((l) => !l.isRetired && names.has(l.section));
+  }, [lotsQuery]);
+  // Rebuild the scene only when the meaningful lot set changes (ids +
+  // statuses), not on every query echo.
+  const sceneSignature = useMemo(() => {
+    if (realLots === null) return "loading";
+    if (realLots.length === 0) return "demo";
+    return realLots
+      .map((l) => `${l._id}:${l.status}`)
+      .sort()
+      .join("|");
+  }, [realLots]);
+  const realDataRef = useRef<RealLotRow[] | null>(realLots);
+  realDataRef.current = realLots;
+
+  // ---- Build the scene when live data resolves (rebuild on change). ----
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage) return;
+    // Hold for the lots query to resolve so we don't build the demo and
+    // immediately rebuild from real data (a visible flash).
+    if (sceneSignature === "loading") return;
+    const realLotRows = realDataRef.current;
+    const realMode = realLotRows !== null && realLotRows.length > 0;
+    setIsDemo(!realMode);
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0xf6f2ea);
@@ -285,19 +364,60 @@ export default function Phase3DMap() {
         scene.add(m);
       });
 
+      // Real lots that belong to this garden (live mode). Laid into the
+      // grid in code order; cells beyond the real count stay empty.
+      const secReal = realMode
+        ? realLotRows!
+            .filter((l) => l.section === sec.name)
+            .slice()
+            .sort((a, b) => a.code.localeCompare(b.code))
+        : [];
+
       const x0 = -sec.w / 2 + cellW / 2;
       const z0 = -sec.d / 2 + cellD / 2;
       for (let r = 0; r < sec.rows; r++) {
         for (let c = 0; c < sec.cols; c++) {
           gid++;
-          const st = pickStatus(gid + sec.id.charCodeAt(0) * 13);
+          const cellIndex = r * sec.cols + c;
+
+          // Resolve the lot for this cell — real or procedural-demo.
+          let st: LotStatus;
+          let type: LotUserData["type"];
+          let code: string;
+          let realLotId: string | null;
+          let price: number;
+          let block: string;
+          let occupant: string | null;
+          if (realMode) {
+            const rl = secReal[cellIndex];
+            if (rl === undefined) continue; // no real lot here — leave empty
+            st = to3DStatus(rl.status);
+            type = to3DType(rl.type);
+            code = rl.code;
+            realLotId = rl._id;
+            price = Math.round(rl.basePriceCents / 100);
+            block = rl.block;
+            occupant = null; // occupant join is out of scope for the survey view
+          } else {
+            st = pickStatus(gid + sec.id.charCodeAt(0) * 13);
+            type =
+              Boolean(sec.mausoleum) && r === 0 && c % 3 !== 1
+                ? "mausoleum"
+                : c % 3 === 0
+                  ? "family"
+                  : "single";
+            code = `${sec.id}-${100 + r * sec.cols + c + 1}`;
+            realLotId = null;
+            price =
+              type === "mausoleum" ? 1350000 : type === "family" ? 340000 : 88000;
+            block = `${sec.id}${r + 1}`;
+            occupant =
+              STATUS[st].stone && st === "occupied"
+                ? (OCC[gid % OCC.length] ?? null)
+                : null;
+          }
           const cfg = STATUS[st];
-          const isMaus = Boolean(sec.mausoleum) && r === 0 && c % 3 !== 1;
-          const type: LotUserData["type"] = isMaus
-            ? "mausoleum"
-            : c % 3 === 0
-              ? "family"
-              : "single";
+          const isMaus = type === "mausoleum";
           const x = sec.cx + x0 + c * cellW;
           const z = z0 + r * cellD;
           const g = new THREE.Group();
@@ -379,21 +499,17 @@ export default function Phase3DMap() {
             g.add(flag);
           }
 
-          const code = `${sec.id}-${100 + r * sec.cols + c + 1}`;
           const userData: LotUserData = {
-            id: "lot" + gid,
+            id: realLotId ?? "lot" + gid,
             code,
             status: st,
             type,
             section: sec.name,
             sectionCode: sec.code,
-            price:
-              type === "mausoleum" ? 1350000 : type === "family" ? 340000 : 88000,
-            occupant:
-              cfg.stone && st === "occupied"
-                ? (OCC[gid % OCC.length] ?? null)
-                : null,
-            block: `${sec.id}${r + 1}`,
+            price,
+            occupant,
+            block,
+            realLotId,
           };
           g.userData = userData;
           scene.add(g);
@@ -564,21 +680,20 @@ export default function Phase3DMap() {
 
     const applyFilter = (f: string) => {
       currentFilter = f;
+      // Toggle whole-lot visibility rather than mutating mesh materials:
+      // lots share cached materials (keyed by colour), so per-mesh opacity
+      // writes collide (last write wins) and the shared concrete bases
+      // never dim. Hiding the group is unambiguous and cheap.
       lots.forEach((g) => {
         const u = g.userData as LotUserData;
-        const show = f === "all" || u.status === f;
-        g.traverse((o) => {
-          const mesh = o as THREE.Mesh;
-          if (mesh.isMesh) {
-            const mat = mesh.material as THREE.Material;
-            mat.transparent = !show;
-            mat.opacity = show ? 1 : 0.1;
-          }
-        });
+        g.visible = f === "all" || u.status === f;
       });
       const u = selectedLot?.userData as LotUserData | undefined;
       ring.visible = Boolean(
-        selectedLot && u && (f === "all" || u.status === f),
+        selectedLot &&
+          selectedLot.visible &&
+          u &&
+          (f === "all" || u.status === f),
       );
     };
 
@@ -717,17 +832,18 @@ export default function Phase3DMap() {
       }
       apiRef.current = null;
     };
-  }, []);
+  }, [sceneSignature]);
 
-  // Bridge filter state → scene.
+  // Bridge filter state → scene. Also re-applied after a rebuild
+  // (sceneSignature change) so the active filter survives a data refresh.
   useEffect(() => {
     apiRef.current?.applyFilter(filter);
-  }, [filter]);
+  }, [filter, sceneSignature]);
 
-  // Bridge auto-rotate toggle → controls.
+  // Bridge auto-rotate toggle → controls (re-applied after a rebuild).
   useEffect(() => {
     apiRef.current?.setAutoRotate(autoRotate);
-  }, [autoRotate]);
+  }, [autoRotate, sceneSignature]);
 
   const onPhaseClick = useCallback((phase: number) => {
     if (phase !== 1) {
@@ -861,6 +977,14 @@ export default function Phase3DMap() {
 
       {/* Rail */}
       <aside className="overflow-y-auto border-t border-surface-border p-6 lg:border-l lg:border-t-0">
+        {isDemo && (
+          <div className="mb-4 rounded-md border border-status-reserved-border/40 bg-status-reserved-bg px-3 py-2 text-[11px] leading-snug text-status-reserved-text">
+            <strong className="font-semibold">Demonstration layout.</strong> No
+            Phase&nbsp;1 lots are loaded yet — this is illustrative. Create lots
+            in the Grace / Faith / Hope gardens (and import GPS geometry) to see
+            the real parcel here.
+          </div>
+        )}
         {selected ? (
           <>
             <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-primary">
@@ -902,13 +1026,20 @@ export default function Phase3DMap() {
             <div className="mt-5 space-y-2.5">
               {selected.status === "available" && (
                 <Link
-                  href="/sales/new"
+                  href={
+                    selected.realLotId
+                      ? `/sales/new?lotId=${encodeURIComponent(selected.realLotId)}`
+                      : "/sales/new"
+                  }
                   className={`${btnPrimary} w-full justify-center`}
                 >
                   Start a sale
                 </Link>
               )}
-              <Link href="/lots" className={`${btnOutline} w-full justify-center`}>
+              <Link
+                href={selected.realLotId ? `/lots/${selected.realLotId}` : "/lots"}
+                className={`${btnOutline} w-full justify-center`}
+              >
                 Open full record
               </Link>
             </div>

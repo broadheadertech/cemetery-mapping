@@ -92,7 +92,7 @@ export default function AdminExpenseApprovalsPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold tracking-tight">
+        <h1 className="font-display text-4xl font-semibold tracking-tight">
           Expense approvals
         </h1>
       </div>

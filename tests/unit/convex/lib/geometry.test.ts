@@ -30,8 +30,9 @@ function getCode(thrown: unknown): string | undefined {
   return data?.code;
 }
 
-// Manila-range vertices used across the tests. Picked so every
-// vertex is inside the sanity range (lat 14.4–14.8, lng 120.9–121.1).
+// In-range vertices used across the tests. Picked so every vertex is
+// inside the coordinate sanity range (lat 13.5–17.0, lng 119.5–122.0,
+// covering Metro Manila up through La Union).
 const V1: LatLng = { lat: 14.676, lng: 121.04 };
 const V2: LatLng = { lat: 14.677, lng: 121.04 };
 const V3: LatLng = { lat: 14.677, lng: 121.05 };
@@ -243,14 +244,14 @@ describe("validatePolygon", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.code).toBe("INVALID_COORD");
-      expect(result.details).toMatch(/Manila sanity range/);
+      expect(result.details).toMatch(/sanity range/);
     }
   });
 
   it("rejects out-of-range lng (above max) with INVALID_COORD", () => {
-    // Lat is in range; lng is over the upper bound (121.1).
+    // Lat is in range; lng is over the upper bound (122.0).
     const result = validatePolygon([
-      { lat: 14.676, lng: 121.5 },
+      { lat: 14.676, lng: 130 },
       V2,
       V3,
     ]);
@@ -262,7 +263,7 @@ describe("validatePolygon", () => {
 
   it("rejects out-of-range lat (above max) with INVALID_COORD", () => {
     const result = validatePolygon([
-      { lat: 15.0, lng: 121.04 },
+      { lat: 50, lng: 121.04 },
       V2,
       V3,
     ]);

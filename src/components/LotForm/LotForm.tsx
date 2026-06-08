@@ -446,7 +446,7 @@ export function LotForm({
         <button
           type="submit"
           disabled={isSubmitting}
-          className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded-md bg-[#1D5C4D] px-4 py-2 text-sm font-medium text-white hover:bg-[#144437] disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isSubmitting
             ? "Saving…"

@@ -76,7 +76,7 @@ export default function IntermentsListPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-3xl font-bold tracking-tight">Interments</h1>
+        <h1 className="font-display text-4xl font-semibold tracking-tight">Interments</h1>
         <div className="flex items-center gap-2">
           <Link
             href="/interments/calendar"
@@ -87,7 +87,7 @@ export default function IntermentsListPage() {
           </Link>
           <Link
             href="/interments/new"
-            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+            className="rounded-md bg-[#1D5C4D] px-4 py-2 text-sm font-medium text-white hover:bg-[#144437]"
           >
             Schedule interment
           </Link>
@@ -139,7 +139,7 @@ export default function IntermentsListPage() {
       {rows !== undefined && rows.length > 0 && (
         <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
+            <thead className="bg-[#F6F2EA] text-left font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#8E8C85]">
               <tr>
                 <th className="px-4 py-3">When</th>
                 <th className="px-4 py-3">Occupant</th>
@@ -176,7 +176,7 @@ function chipClass(active: boolean): string {
   return [
     "inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium",
     active
-      ? "border-slate-900 bg-slate-900 text-white"
+      ? "border-[#1D5C4D] bg-[#1D5C4D] text-white"
       : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
   ].join(" ");
 }

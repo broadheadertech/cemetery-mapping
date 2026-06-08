@@ -334,6 +334,12 @@ export default defineSchema({
     number: v.number(),
     name: v.string(),
     sectionsLabel: v.string(),
+    // Free-text `lots.section` names this parcel owns. When present and
+    // matching real lot rows, `getPhasePlanningOverview` computes the
+    // runway from live inventory; otherwise it falls back to the stored
+    // `plannedLotCount` / `availableLotCount` below. Optional so adding
+    // it does not invalidate phase rows seeded before this field existed.
+    sectionNames: v.optional(v.array(v.string())),
     stage: v.union(
       v.literal("live"),
       v.literal("surveying"),

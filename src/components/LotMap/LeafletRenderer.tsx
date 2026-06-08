@@ -62,6 +62,12 @@ export interface LeafletRendererProps {
    * that own viewport state should always supply it.
    */
   onBboxChange?: (bbox: Bbox) => void;
+  /**
+   * When set (and changed), the map flies to this point — used by the
+   * find-a-grave search to jump to a lot. A post-init `flyTo`, so it
+   * doesn't hit the init-time `_leaflet_pos` path.
+   */
+  focusPoint?: { lat: number; lng: number } | null;
 }
 
 /**
@@ -119,6 +125,7 @@ export function LeafletRenderer({
   height = 600,
   selectedLotId,
   onBboxChange,
+  focusPoint,
 }: LeafletRendererProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   // Hold Leaflet's `Map` instance in a ref so we don't trip React's
@@ -175,8 +182,16 @@ export function LeafletRenderer({
           maxZoom: 19,
         }).addTo(map);
 
-        // Try to frame the bbox where possible; ignored if the bbox
-        // collapsed to a point (placeholder-only data).
+        // Settle the container size before any view change. On a
+        // just-created map an ANIMATED fit reads the map pane's
+        // `_leaflet_pos` before the zoom-animation transform is set,
+        // throwing "Cannot read properties of undefined (reading
+        // '_leaflet_pos')". `invalidateSize` + a non-animated fit avoid
+        // that path entirely (the user's own pan/zoom still animates).
+        map.invalidateSize({ animate: false });
+
+        // Frame the bbox where possible; skipped if it collapsed to a
+        // point (placeholder-only data).
         if (
           bbox.bboxMaxLat > bbox.bboxMinLat &&
           bbox.bboxMaxLng > bbox.bboxMinLng
@@ -186,7 +201,7 @@ export function LeafletRenderer({
               [bbox.bboxMinLat, bbox.bboxMinLng],
               [bbox.bboxMaxLat, bbox.bboxMaxLng],
             ],
-            { padding: [16, 16] },
+            { padding: [16, 16], animate: false },
           );
         }
 
@@ -341,6 +356,18 @@ export function LeafletRenderer({
       cancelled = true;
     };
   }, [lots, selectedLotId, ready, onLotClick]);
+
+  // Fly to a requested point (find-a-grave). Runs only after the map is
+  // ready, so it never races the bootstrap's init view.
+  useEffect(() => {
+    if (!ready || focusPoint === undefined || focusPoint === null) return;
+    const map = mapRef.current as {
+      flyTo?: (latlng: [number, number], zoom?: number) => void;
+    } | null;
+    if (map !== null && typeof map.flyTo === "function") {
+      map.flyTo([focusPoint.lat, focusPoint.lng], 19);
+    }
+  }, [focusPoint, ready]);
 
   if (loadFailed) {
     // Story 8.2 (HIGH-fix) — throw on render so the parent's

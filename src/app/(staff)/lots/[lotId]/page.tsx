@@ -127,7 +127,7 @@ export default function LotDetailPage() {
   if (lot === null) {
     return (
       <div className="space-y-4" data-testid="lot-detail-not-found">
-        <h1 className="text-3xl font-bold tracking-tight text-slate-900">
+        <h1 className="font-display text-4xl font-semibold tracking-tight text-slate-900">
           Lot not found
         </h1>
         <div

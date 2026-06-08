@@ -20,6 +20,8 @@
  * the actual sale flow; the UI gate is purely for defensive UX.
  */
 
+import { Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { useQuery } from "convex/react";
 import { makeFunctionReference } from "convex/server";
 
@@ -37,19 +39,32 @@ const getCurrentUserOrNullRef = makeFunctionReference<
   AuthPayload | null
 >("lib/auth:getCurrentUserOrNull");
 
-export default function NewSalePage() {
+function NewSaleContent() {
   const me = useQuery(getCurrentUserOrNullRef, {});
   const roles: ReadonlyArray<string> = me?.roles ?? [];
+  // Deep-link: "Start sale" from a lot's detail page / the map arrives as
+  // `/sales/new?lotId=…` and the SaleForm pre-selects that lot.
+  const searchParams = useSearchParams();
+  const initialLotId = searchParams.get("lotId") ?? undefined;
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
-      <h1 className="text-3xl font-bold tracking-tight">New sale</h1>
+      <h1 className="font-display text-4xl font-semibold tracking-tight">New sale</h1>
       <p className="text-sm text-slate-600">
         Pick an available lot, pick or create the customer, then review the
         receipt preview before generating. The receipt serial is allocated at
         commit time and cannot be re-issued.
       </p>
-      <SaleForm userRoles={roles} />
+      <SaleForm userRoles={roles} initialLotId={initialLotId} />
     </div>
+  );
+}
+
+export default function NewSalePage() {
+  // `useSearchParams` requires a Suspense boundary (Next.js App Router).
+  return (
+    <Suspense fallback={null}>
+      <NewSaleContent />
+    </Suspense>
   );
 }

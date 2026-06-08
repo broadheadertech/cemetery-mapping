@@ -200,7 +200,7 @@ export default function SalesReportPage(): React.ReactElement {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">
+        <h1 className="font-display text-4xl font-semibold tracking-tight">
           Sales by dimension
         </h1>
         <p className="mt-1 text-sm text-slate-600">
@@ -252,7 +252,7 @@ export default function SalesReportPage(): React.ReactElement {
         <button
           type="submit"
           disabled={!rangeValid}
-          className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-md bg-[#1D5C4D] px-4 py-2 text-sm font-medium text-white hover:bg-[#144437] disabled:cursor-not-allowed disabled:opacity-50"
           data-testid="report-run"
         >
           Run
@@ -337,7 +337,7 @@ export default function SalesReportPage(): React.ReactElement {
             data-testid="report-table"
           >
             <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
+              <thead className="bg-[#F6F2EA] text-left font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#8E8C85]">
                 <tr>
                   <th className="px-4 py-3">Group</th>
                   <th className="px-4 py-3 text-right">Sales</th>

@@ -140,7 +140,7 @@ export default function AdminHubPage() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Administration</h1>
+        <h1 className="font-display text-4xl font-semibold tracking-tight">Administration</h1>
         <p className="mt-1 max-w-2xl text-sm text-slate-600">
           Cemetery-wide configuration, compliance, and back-office tools.
           Everything here is admin-only.

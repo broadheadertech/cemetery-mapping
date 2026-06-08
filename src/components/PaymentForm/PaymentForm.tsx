@@ -870,7 +870,7 @@ export function PaymentForm({ contractId }: PaymentFormProps) {
                 className={cn(
                   "min-h-[44px] rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700",
                   "hover:bg-slate-50",
-                  customMode && "border-slate-900 bg-slate-100",
+                  customMode && "border-[#1D5C4D] bg-slate-100",
                 )}
                 aria-pressed={customMode}
               >
@@ -884,8 +884,8 @@ export function PaymentForm({ contractId }: PaymentFormProps) {
               disabled={!isValid || previewData === null}
               data-testid="payment-form-submit"
               className={cn(
-                "min-h-[44px] rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white",
-                "hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60",
+                "min-h-[44px] rounded-md bg-[#1D5C4D] px-4 py-2 text-sm font-medium text-white",
+                "hover:bg-[#144437] disabled:cursor-not-allowed disabled:opacity-60",
               )}
             >
               Review receipt

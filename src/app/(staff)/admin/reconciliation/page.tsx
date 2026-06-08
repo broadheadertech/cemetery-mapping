@@ -141,7 +141,7 @@ export default function AdminReconciliationPage(): ReactElement {
   return (
     <div className="space-y-6">
       <header className="space-y-1">
-        <h1 className="text-3xl font-bold tracking-tight">
+        <h1 className="font-display text-4xl font-semibold tracking-tight">
           Reconciliation failures
         </h1>
         <p className="max-w-2xl text-sm text-slate-600">
@@ -268,7 +268,7 @@ export default function AdminReconciliationPage(): ReactElement {
                               }
                               disabled={busyId === row._id}
                               data-testid={`reconciliation-confirm-${row._id}`}
-                              className="inline-flex min-h-[36px] items-center justify-center rounded-md bg-slate-900 px-3 py-1 text-xs font-medium text-white disabled:opacity-60"
+                              className="inline-flex min-h-[36px] items-center justify-center rounded-md bg-[#1D5C4D] px-3 py-1 text-xs font-medium text-white disabled:opacity-60"
                             >
                               {busyId === row._id
                                 ? "Saving..."

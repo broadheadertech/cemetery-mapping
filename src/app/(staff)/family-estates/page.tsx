@@ -106,12 +106,12 @@ export default function FamilyEstatesListPage() {
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold tracking-tight">Family estates</h1>
+        <h1 className="font-display text-4xl font-semibold tracking-tight">Family estates</h1>
         <button
           type="button"
           onClick={() => setShowCreate((s) => !s)}
           data-testid="family-estate-toggle-create"
-          className="min-h-[44px] rounded-md border border-slate-900 bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800"
+          className="min-h-[44px] rounded-md border border-[#1D5C4D] bg-[#1D5C4D] px-3 py-2 text-sm font-medium text-white hover:bg-[#144437]"
         >
           {showCreate ? "Cancel" : "+ New estate"}
         </button>
@@ -196,7 +196,7 @@ export default function FamilyEstatesListPage() {
             disabled={isCreating}
             onClick={handleCreate}
             data-testid="family-estate-create-submit"
-            className="min-h-[44px] rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-60"
+            className="min-h-[44px] rounded-md bg-[#1D5C4D] px-3 py-2 text-sm font-medium text-white hover:bg-[#144437] disabled:opacity-60"
           >
             {isCreating ? "Creating…" : "Create estate"}
           </button>

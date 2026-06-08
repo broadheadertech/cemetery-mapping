@@ -282,6 +282,8 @@ function SourcePanel({
         . Lots already marked surveyed are skipped by default.
       </p>
 
+      <CsvFormatGuide />
+
       <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-start sm:gap-6">
         <div className="space-y-1">
           <label
@@ -333,6 +335,96 @@ function SourcePanel({
         </div>
       </div>
     </section>
+  );
+}
+
+/**
+ * Guided CSV affordance: a one-click template download plus an
+ * expandable column/format reference. Lives inside the Source panel so
+ * the surveyor sees exactly what the importer expects before uploading —
+ * the most error-prone part is the lng/lat ordering inside WKT vs. the
+ * lat/lng centroid columns, so that gotcha is called out explicitly.
+ */
+function CsvFormatGuide() {
+  return (
+    <details className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm">
+      <summary className="flex cursor-pointer items-center justify-between gap-3 font-medium text-slate-800">
+        <span>CSV format &amp; template</span>
+        <a
+          href="/templates/gps-import-template.csv"
+          download
+          onClick={(e) => e.stopPropagation()}
+          className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+        >
+          Download CSV template
+        </a>
+      </summary>
+
+      <div className="mt-3 space-y-3 text-slate-700">
+        <p>
+          One row per lot. The header row is required (column order does
+          not matter; names are matched case-insensitively).
+        </p>
+        <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
+          <strong>Easiest:</strong> fill only <code>lotCode</code>,{" "}
+          <code>lat</code>, and <code>lng</code> — leave{" "}
+          <code>polygonWKT</code> blank and the lot&apos;s box is drawn for
+          you. Get a point by right-clicking the spot in Google Maps (it shows{" "}
+          <code>lat, lng</code>).
+        </p>
+        <ul className="space-y-1.5 text-xs">
+          <li>
+            <code className="rounded bg-slate-100 px-1 py-0.5">lotCode</code>{" "}
+            <span className="font-medium text-red-700">required</span> — must
+            match an existing lot&apos;s code (e.g. <code>A-101</code>).
+            Unmatched codes are reported, not created.
+          </li>
+          <li>
+            <code className="rounded bg-slate-100 px-1 py-0.5">lat</code>,{" "}
+            <code className="rounded bg-slate-100 px-1 py-0.5">lng</code>{" "}
+            <span className="font-medium text-emerald-700">
+              the easy path
+            </span>{" "}
+            — the lot&apos;s centre point, <strong>latitude first</strong>.
+            Supply both. The importer draws a small footprint around it
+            automatically.
+          </li>
+          <li>
+            <code className="rounded bg-slate-100 px-1 py-0.5">polygonWKT</code>{" "}
+            <span className="text-slate-500">optional / advanced</span> — the
+            exact outline as OGC WKT:{" "}
+            <code className="rounded bg-slate-100 px-1 py-0.5">
+              POLYGON((lng lat, lng lat, …))
+            </code>
+            . Here the order is{" "}
+            <strong>longitude first, then latitude</strong> (the WKT/GeoJSON
+            convention). Wrap the cell in quotes — it contains commas. Provide
+            this <em>or</em> lat/lng. When both are given, the polygon wins and
+            the centroid must sit within ~5&nbsp;m of it.
+          </li>
+        </ul>
+        <div>
+          <div className="mb-1 text-xs font-medium text-slate-600">
+            Example — first two rows are centre-point only; the third gives an
+            exact outline
+          </div>
+          <pre className="overflow-x-auto rounded-md border border-slate-200 bg-white p-2 font-mono text-[11px] leading-relaxed text-slate-700">
+{`lotCode,lat,lng,polygonWKT
+A-101,16.42050,120.34120,
+A-102,16.42050,120.34135,
+A-103,,,"POLYGON((120.34115 16.42055, 120.34125 16.42055, 120.34125 16.42065, 120.34115 16.42065, 120.34115 16.42055))"`}
+          </pre>
+        </div>
+        <p className="text-xs text-slate-500">
+          Surveyors exporting from QGIS / ArcGIS can also upload a GeoJSON
+          FeatureCollection directly (each feature needs{" "}
+          <code className="rounded bg-slate-100 px-1 py-0.5">
+            properties.lotCode
+          </code>{" "}
+          and a <code>Polygon</code> geometry) — no CSV conversion needed.
+        </p>
+      </div>
+    </details>
   );
 }
 
@@ -406,7 +498,7 @@ function PreviewPanel({
           data-testid="gps-import-preview-table"
         >
           <table className="w-full text-sm">
-            <thead className="sticky top-0 bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
+            <thead className="sticky top-0 bg-[#F6F2EA] text-left font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#8E8C85]">
               <tr>
                 <th className="px-3 py-2">Lot code</th>
                 <th className="px-3 py-2">Vertices</th>
@@ -480,7 +572,7 @@ function PreviewPanel({
           onClick={onRun}
           disabled={!canRun}
           data-testid="gps-import-run-button"
-          className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded-md bg-[#1D5C4D] px-4 py-2 text-sm font-medium text-white hover:bg-[#144437] disabled:cursor-not-allowed disabled:opacity-60"
         >
           {submitting ? "Importing…" : `Import ${itemCount} lot${itemCount === 1 ? "" : "s"}`}
         </button>

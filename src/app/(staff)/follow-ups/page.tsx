@@ -132,11 +132,11 @@ export default function FollowUpsListPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold tracking-tight">Follow-ups</h1>
+        <h1 className="font-display text-4xl font-semibold tracking-tight">Follow-ups</h1>
         <button
           type="button"
           onClick={() => setShowForm((s) => !s)}
-          className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+          className="rounded-md bg-[#1D5C4D] px-4 py-2 text-sm font-medium text-white hover:bg-[#144437]"
           data-testid="follow-ups-new-toggle"
         >
           {showForm ? "Close form" : "Log follow-up"}
@@ -214,7 +214,7 @@ export default function FollowUpsListPage() {
       {rows !== undefined && rows.length > 0 && (
         <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
+            <thead className="bg-[#F6F2EA] text-left font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#8E8C85]">
               <tr>
                 <th className="px-4 py-3">Due</th>
                 <th className="px-4 py-3">Action</th>

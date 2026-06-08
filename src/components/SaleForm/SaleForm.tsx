@@ -125,11 +125,17 @@ export interface SaleFormProps {
    * defense in depth. Defaults to empty (treat as non-admin).
    */
   userRoles?: ReadonlyArray<string>;
+  /**
+   * Deep-link target from `/sales/new?lotId=…` — the lot is pre-selected
+   * once the picker's available-lots list loads. Forwarded to the
+   * single-lot `LotPicker`; ignored in estate mode.
+   */
+  initialLotId?: string;
 }
 
 type ActiveTab = "full" | "installment";
 
-export function SaleForm({ userRoles = [] }: SaleFormProps) {
+export function SaleForm({ userRoles = [], initialLotId }: SaleFormProps) {
   const router = useRouter();
   const idempotencyKey = useIdempotencyKey();
   const recordFullPaymentSale = useMutation(recordFullPaymentSaleRef);
@@ -430,7 +436,7 @@ export function SaleForm({ userRoles = [] }: SaleFormProps) {
             className={cn(
               "min-h-[44px] border-b-2 px-4 py-2 text-sm font-medium",
               tab === t
-                ? "border-slate-900 text-slate-900"
+                ? "border-[#1D5C4D] text-slate-900"
                 : "border-transparent text-slate-500 hover:text-slate-700",
             )}
           >
@@ -492,7 +498,7 @@ export function SaleForm({ userRoles = [] }: SaleFormProps) {
                 className={cn(
                   "min-h-[44px] rounded-md border px-3 py-2 text-sm font-medium",
                   saleMode === m
-                    ? "border-slate-900 bg-slate-900 text-white"
+                    ? "border-[#1D5C4D] bg-[#1D5C4D] text-white"
                     : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
                 )}
               >
@@ -505,6 +511,7 @@ export function SaleForm({ userRoles = [] }: SaleFormProps) {
             <LotPicker
               value={selectedLot?.lotId ?? ""}
               onSelect={handleLotSelected}
+              autoSelectLotId={initialLotId}
             />
           ) : (
             <EstatePicker
@@ -912,8 +919,8 @@ export function SaleForm({ userRoles = [] }: SaleFormProps) {
               disabled={!isValid || previewData === null}
               data-testid="sale-form-submit"
               className={cn(
-                "min-h-[44px] rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white",
-                "hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60",
+                "min-h-[44px] rounded-md bg-[#1D5C4D] px-4 py-2 text-sm font-medium text-white",
+                "hover:bg-[#144437] disabled:cursor-not-allowed disabled:opacity-60",
               )}
             >
               Review receipt

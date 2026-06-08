@@ -78,23 +78,25 @@ export function UserMenu({ name, email, collapsed }: UserMenuProps) {
           type="button"
           aria-label="Open user menu"
           className={cn(
-            "flex w-full items-center rounded-md text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-1 hover:bg-surface-emphasis",
+            // Trigger lives inside the deep-emerald sidebar — dark
+            // treatment (moss avatar, ivory name, gold-soft email).
+            "flex w-full items-center rounded-md text-left text-sm hover:bg-[rgba(246,242,234,0.07)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C9A96B] focus-visible:ring-offset-1 focus-visible:ring-offset-[#144437]",
             collapsed ? "justify-center p-2" : "gap-3 p-2",
           )}
         >
           <span
             aria-hidden="true"
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-emphasis text-xs font-semibold text-text-default"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#4A8270] font-display text-sm font-semibold text-[#F6F2EA]"
           >
             {initials}
           </span>
           {!collapsed && (
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium text-text-default">
+              <span className="block truncate text-[13px] font-semibold text-[#F6F2EA]">
                 {name || email}
               </span>
               {name && (
-                <span className="block truncate text-xs text-text-muted">
+                <span className="block truncate text-[11px] text-[rgba(246,242,234,0.55)]">
                   {email}
                 </span>
               )}

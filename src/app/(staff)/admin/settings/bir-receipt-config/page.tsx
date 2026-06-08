@@ -262,7 +262,7 @@ export default function BirReceiptConfigPage(): React.ReactElement {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">
+        <h1 className="font-display text-4xl font-semibold tracking-tight">
           BIR Receipt Configuration
         </h1>
         <p className="mt-1 text-sm text-slate-600">
@@ -500,7 +500,7 @@ export default function BirReceiptConfigPage(): React.ReactElement {
             <button
               type="submit"
               disabled={busy}
-              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-md bg-[#1D5C4D] px-4 py-2 text-sm font-medium text-white hover:bg-[#144437] disabled:cursor-not-allowed disabled:opacity-50"
               data-testid="bir-config-save"
             >
               {busy ? "Saving…" : "Save changes"}

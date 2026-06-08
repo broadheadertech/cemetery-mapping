@@ -88,7 +88,7 @@ export default function MyExportsPage(): React.ReactElement {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">My exports</h1>
+        <h1 className="font-display text-4xl font-semibold tracking-tight">My exports</h1>
         <p className="mt-1 text-sm text-slate-600">
           Excel and PDF exports you have requested. Files are kept for
           30 days; re-run a report to generate a fresh export.
@@ -123,7 +123,7 @@ export default function MyExportsPage(): React.ReactElement {
           data-testid="my-exports-table"
         >
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
+            <thead className="bg-[#F6F2EA] text-left font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#8E8C85]">
               <tr>
                 <th className="px-4 py-3">Report</th>
                 <th className="px-4 py-3">Format</th>

@@ -63,13 +63,6 @@ export function MobileTopBar({
               `forceExpanded`. */}
           <Sidebar
             collapsed={false}
-            onToggleCollapse={() => {
-              /* unused; the sheet hides the collapse toggle */
-            }}
-            onOpenSearch={() => {
-              setNavOpen(false);
-              onOpenSearch();
-            }}
             roles={roles}
             forceExpanded
             user={user}

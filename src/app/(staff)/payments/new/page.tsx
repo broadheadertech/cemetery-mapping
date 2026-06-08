@@ -37,7 +37,7 @@ export default function NewPaymentPage() {
   if (contractId === null || contractId.length === 0) {
     return (
       <div className="mx-auto max-w-2xl space-y-6">
-        <h1 className="text-3xl font-bold tracking-tight">Record payment</h1>
+        <h1 className="font-display text-4xl font-semibold tracking-tight">Record payment</h1>
         <div
           role="alert"
           data-testid="payment-page-missing-contract"

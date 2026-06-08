@@ -40,7 +40,7 @@ export default function AdminGpsImportPage() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-3xl font-bold tracking-tight">GPS geometry import</h1>
+        <h1 className="font-display text-4xl font-semibold tracking-tight">GPS geometry import</h1>
         <p className="mt-1 max-w-2xl text-sm text-slate-600">
           Bridge Phase 1 (placeholder geometry) to Phase 2 (real surveyed
           polygons) by uploading the surveyor&apos;s deliverable. Every applied

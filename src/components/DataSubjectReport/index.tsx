@@ -74,7 +74,7 @@ export function DataSubjectReportView({
           type="button"
           onClick={handleDownload}
           data-testid="download-json-button"
-          className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+          className="rounded-md bg-[#1D5C4D] px-4 py-2 text-sm font-medium text-white hover:bg-[#144437]"
         >
           Download JSON
         </button>
@@ -160,7 +160,7 @@ function AuditTrailPanel({
       ) : (
         <div className="overflow-x-auto rounded-md border border-slate-200">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
+            <thead className="bg-[#F6F2EA] text-left font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#8E8C85]">
               <tr>
                 <th className="px-3 py-2">When</th>
                 <th className="px-3 py-2">Action</th>

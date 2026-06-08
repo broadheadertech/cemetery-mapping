@@ -32,6 +32,8 @@
 
 import type { ReactElement } from "react";
 
+import Link from "next/link";
+import { AlertTriangle } from "lucide-react";
 import { useQuery } from "convex/react";
 import { makeFunctionReference } from "convex/server";
 
@@ -64,26 +66,26 @@ export function ReconciliationBanner(): ReactElement | null {
       role="alert"
       aria-live="polite"
       data-testid="dashboard-reconciliation-banner"
-      className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900 shadow-sm"
+      className="flex flex-wrap items-center gap-3 rounded-md border border-[#FDE68A] bg-[#FFFBEB] px-[18px] py-[13px] text-[13.5px] font-medium text-[#78350F]"
     >
-      <div className="space-y-1">
-        <p className="font-semibold">
-          Reconciliation drift detected
-        </p>
-        <p className="text-red-800">
-          {failures.count === 1
-            ? "1 unacknowledged reconciliation failure is currently open."
-            : `${failures.count} unacknowledged reconciliation failures are currently open.`}{" "}
-          Review and acknowledge each one to clear this banner.
-        </p>
-      </div>
-      <a
+      <AlertTriangle
+        className="h-[18px] w-[18px] shrink-0 text-[#B45309]"
+        aria-hidden="true"
+      />
+      <span className="flex-1">
+        <strong className="font-semibold">Reconciliation drift:</strong>{" "}
+        {failures.count === 1
+          ? "1 unacknowledged reconciliation failure is open"
+          : `${failures.count} unacknowledged reconciliation failures are open`}{" "}
+        awaiting acknowledgement.
+      </span>
+      <Link
         href="/admin/reconciliation"
         data-testid="dashboard-reconciliation-banner-link"
-        className="inline-flex min-h-[44px] items-center justify-center rounded-md bg-red-700 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-red-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2"
+        className="shrink-0 font-semibold text-[#1D5C4D] underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C9A96B] focus-visible:ring-offset-2"
       >
-        Review failures
-      </a>
+        Review
+      </Link>
     </div>
   );
 }

@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Sidebar } from "@/components/Sidebar";
+import { DesktopTopBar } from "@/components/DesktopTopBar";
 import { MobileTopBar } from "@/components/MobileTopBar";
 import { LotSearchCommand } from "@/components/LotSearchCommand";
 import { useCollapsedSidebar } from "@/hooks/useCollapsedSidebar";
@@ -77,14 +78,24 @@ export function AppShell({
         <div className="hidden md:sticky md:top-0 md:flex md:h-screen md:shrink-0">
           <Sidebar
             collapsed={collapsed}
-            onToggleCollapse={toggleCollapsed}
-            onOpenSearch={openPalette}
             roles={user.roles}
             user={{ name: user.name, email: user.email }}
           />
         </div>
 
-        <div className="flex min-w-0 flex-1 flex-col">
+        {/* Ivory content canvas (brand environment color) against the
+            deep-emerald sidebar — matches the operations design system. */}
+        <div className="flex min-w-0 flex-1 flex-col bg-[#F6F2EA]">
+          {/* Desktop top bar — hidden < md. Hamburger collapse, centred
+              Cmd-K search, notifications bell. */}
+          <div className="hidden md:block">
+            <DesktopTopBar
+              onToggleCollapse={toggleCollapsed}
+              onOpenSearch={openPalette}
+              collapsed={collapsed}
+            />
+          </div>
+
           {/* Mobile top bar — hidden >= md. */}
           <div className="md:hidden">
             <MobileTopBar

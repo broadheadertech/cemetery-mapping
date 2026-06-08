@@ -139,7 +139,7 @@ export function NavigateToLotButton({
     "transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
     disabled
       ? "cursor-not-allowed border border-slate-200 bg-slate-100 text-slate-400"
-      : "border border-slate-900 bg-slate-900 text-white hover:bg-slate-800 focus-visible:ring-slate-900",
+      : "border border-[#1D5C4D] bg-[#1D5C4D] text-white hover:bg-[#144437] focus-visible:ring-slate-900",
     className,
   );
 

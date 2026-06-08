@@ -340,8 +340,8 @@ export function OwnershipTransferForm({
             aria-disabled={isSubmitting}
             data-testid="ownership-transfer-confirm-submit"
             className={cn(
-              "min-h-[44px] rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white",
-              "hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60",
+              "min-h-[44px] rounded-md bg-[#1D5C4D] px-4 py-2 text-sm font-medium text-white",
+              "hover:bg-[#144437] disabled:cursor-not-allowed disabled:opacity-60",
             )}
           >
             {isSubmitting ? "Recording…" : "Record transfer"}
@@ -496,7 +496,7 @@ export function OwnershipTransferForm({
                         "min-h-[36px] rounded-md px-3 py-1 text-xs font-medium",
                         isSelf
                           ? "cursor-not-allowed bg-slate-100 text-slate-400"
-                          : "bg-slate-900 text-white hover:bg-slate-800",
+                          : "bg-[#1D5C4D] text-white hover:bg-[#144437]",
                       )}
                     >
                       {isSelf ? "Current owner" : "Select"}
@@ -628,8 +628,8 @@ export function OwnershipTransferForm({
           aria-disabled={submitDisabled}
           data-testid="ownership-transfer-review"
           className={cn(
-            "min-h-[44px] rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white",
-            "hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60",
+            "min-h-[44px] rounded-md bg-[#1D5C4D] px-4 py-2 text-sm font-medium text-white",
+            "hover:bg-[#144437] disabled:cursor-not-allowed disabled:opacity-60",
           )}
         >
           Review transfer

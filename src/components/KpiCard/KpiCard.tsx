@@ -90,11 +90,12 @@ export function KpiCard({ label, value, delta, onClick }: KpiCardProps) {
 
   const inner = (
     <div className="flex flex-col gap-0.5">
-      <span className="truncate text-xs leading-tight text-slate-500">
+      <span className="truncate text-[11.5px] font-semibold leading-tight text-[#8E8C85]">
         {label}
       </span>
       <ReactiveHighlight watch={value} className="mt-1">
-        <span className="text-2xl font-bold leading-tight tabular-nums md:text-3xl">
+        {/* Cormorant serif value per the operations design system. */}
+        <span className="font-display text-[34px] font-semibold leading-none tabular-nums text-[#2A2925]">
           {value}
         </span>
       </ReactiveHighlight>
@@ -116,7 +117,7 @@ export function KpiCard({ label, value, delta, onClick }: KpiCardProps) {
   // the button variant only — the static `<div>` carries no tap-target
   // expectation per the story disaster-prevention notes.
   const baseClasses =
-    "block w-full rounded-lg border border-surface-border bg-surface-base p-4 text-left shadow-[var(--shadow-card)]";
+    "relative block w-full overflow-hidden rounded-lg border border-surface-border bg-white p-4 text-left shadow-[var(--shadow-card)]";
 
   if (onClick) {
     return (
@@ -126,11 +127,17 @@ export function KpiCard({ label, value, delta, onClick }: KpiCardProps) {
         aria-label={ariaLabel}
         className={cn(
           baseClasses,
-          "min-h-[44px]",
-          "transition-colors hover:bg-surface-muted",
+          "group min-h-[44px]",
+          // Gold border + subtle lift on hover (design's .kpi hover).
+          "transition-all hover:-translate-y-px hover:border-[#C9A96B]",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-2",
         )}
       >
+        {/* Rationed-gold left accent bar — fades in on hover (.kpi-accent). */}
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-y-0 left-0 w-[3px] bg-[#C9A96B] opacity-0 transition-opacity group-hover:opacity-100"
+        />
         {inner}
       </button>
     );

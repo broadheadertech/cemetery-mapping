@@ -239,7 +239,7 @@ export default function AdminAuditLogPage(): ReactElement {
   return (
     <div className="space-y-6">
       <header className="space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight">Audit log</h1>
+        <h1 className="font-display text-4xl font-semibold tracking-tight">Audit log</h1>
         <p className="max-w-3xl text-sm text-slate-600">
           Read-only browser of every financial-touching action recorded by
           the system. PII (gov-IDs, addresses) is redacted at write time
@@ -398,7 +398,7 @@ function AuditLogFilterBar({
         </button>
         <button
           type="submit"
-          className="rounded-md bg-slate-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-slate-800"
+          className="rounded-md bg-[#1D5C4D] px-4 py-1.5 text-sm font-medium text-white hover:bg-[#144437]"
         >
           Apply filters
         </button>

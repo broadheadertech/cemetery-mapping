@@ -67,6 +67,13 @@ export interface PhaseOverviewRow {
   sellThroughPercent: number;
   /** availableLotCount ÷ monthlyAbsorption, or null when absorption is 0. */
   runwayMonths: number | null;
+  /**
+   * "live" when the lot counts were computed from real inventory in this
+   * phase's sections; "seeded" when they fell back to the stored figures
+   * (no `sectionNames`, or no matching lots loaded yet). Lets the UI flag
+   * illustrative vs. live numbers.
+   */
+  dataSource: "live" | "seeded";
 }
 
 export interface PhasePlanningOverview {
@@ -78,15 +85,41 @@ export interface PhasePlanningOverview {
   generatedAtMs: number;
 }
 
-function deriveRow(row: PhaseDoc): PhaseOverviewRow {
-  const soldCount = Math.max(0, row.plannedLotCount - row.availableLotCount);
+/** Minimal lot shape this query reads for the live roll-up. */
+interface LotForPhase {
+  section: string;
+  status: string;
+  isRetired: boolean;
+}
+
+function deriveRow(row: PhaseDoc, lots: LotForPhase[]): PhaseOverviewRow {
+  // Prefer live inventory when this phase declares its sections AND those
+  // sections actually contain lots; otherwise fall back to the stored
+  // (seeded) figures so a fresh deployment still shows a populated screen.
+  let plannedLotCount = row.plannedLotCount;
+  let availableLotCount = row.availableLotCount;
+  let dataSource: "live" | "seeded" = "seeded";
+  const names = row.sectionNames;
+  if (names !== undefined && names.length > 0) {
+    const sectionSet = new Set(names);
+    const matched = lots.filter(
+      (l) => !l.isRetired && sectionSet.has(l.section),
+    );
+    if (matched.length > 0) {
+      plannedLotCount = matched.length;
+      availableLotCount = matched.filter((l) => l.status === "available").length;
+      dataSource = "live";
+    }
+  }
+
+  const soldCount = Math.max(0, plannedLotCount - availableLotCount);
   const sellThroughPercent =
-    row.plannedLotCount > 0
-      ? Math.round((soldCount / row.plannedLotCount) * 100)
+    plannedLotCount > 0
+      ? Math.round((soldCount / plannedLotCount) * 100)
       : 0;
   const runwayMonths =
     row.monthlyAbsorption > 0
-      ? Math.round((row.availableLotCount / row.monthlyAbsorption) * 10) / 10
+      ? Math.round((availableLotCount / row.monthlyAbsorption) * 10) / 10
       : null;
 
   const out: PhaseOverviewRow = {
@@ -95,14 +128,15 @@ function deriveRow(row: PhaseDoc): PhaseOverviewRow {
     name: row.name,
     sectionsLabel: row.sectionsLabel,
     stage: row.stage,
-    plannedLotCount: row.plannedLotCount,
-    availableLotCount: row.availableLotCount,
+    plannedLotCount,
+    availableLotCount,
     monthlyAbsorption: row.monthlyAbsorption,
     surveyLeadWeeks: row.surveyLeadWeeks,
     readiness: row.readiness,
     soldCount,
     sellThroughPercent,
     runwayMonths,
+    dataSource,
   };
   if (row.projectedSelloutLabel !== undefined) {
     out.projectedSelloutLabel = row.projectedSelloutLabel;
@@ -130,7 +164,16 @@ export const getPhasePlanningOverview = queryGeneric({
     const active = rows.filter((r) => !r.isRetired);
     active.sort((a, b) => a.number - b.number);
 
-    const phases = active.map(deriveRow);
+    // One scan of the lots table feeds every phase's live roll-up. Phase 1
+    // scale (~2k lots) keeps this comfortably within the query budget.
+    const lots = await ctx.db.query("lots").collect();
+    const lotsForPhase: LotForPhase[] = lots.map((l) => ({
+      section: l.section,
+      status: l.status,
+      isRetired: l.isRetired,
+    }));
+
+    const phases = active.map((row) => deriveRow(row, lotsForPhase));
     const nextPhase = phases.find((p) => p.stage !== "live");
 
     return {
@@ -150,6 +193,7 @@ const DEFAULT_PHASES: ReadonlyArray<{
   number: number;
   name: string;
   sectionsLabel: string;
+  sectionNames: string[];
   stage: PhaseStage;
   plannedLotCount: number;
   availableLotCount: number;
@@ -163,6 +207,7 @@ const DEFAULT_PHASES: ReadonlyArray<{
     number: 1,
     name: "Northwest Parcel",
     sectionsLabel: "Grace · Faith · Hope",
+    sectionNames: ["Garden of Grace", "Garden of Faith", "Garden of Hope"],
     stage: "live",
     plannedLotCount: 1016,
     availableLotCount: 51,
@@ -176,6 +221,7 @@ const DEFAULT_PHASES: ReadonlyArray<{
     number: 2,
     name: "East Parcel",
     sectionsLabel: "Peace · Columbarium East",
+    sectionNames: ["Garden of Peace", "Columbarium East"],
     stage: "surveying",
     plannedLotCount: 904,
     availableLotCount: 904,
@@ -197,6 +243,9 @@ const DEFAULT_PHASES: ReadonlyArray<{
     number: 3,
     name: "South Parcel",
     sectionsLabel: "Mausoleum II · New Garden",
+    // Future sections — no lots exist yet, so this always uses the
+    // seeded figures until the parcel is surveyed and lots are created.
+    sectionNames: [],
     stage: "planned",
     plannedLotCount: 640,
     availableLotCount: 640,
@@ -229,6 +278,7 @@ export const seedDefaultPhases = mutationGeneric({
         number: number;
         name: string;
         sectionsLabel: string;
+        sectionNames: string[];
         stage: PhaseStage;
         plannedLotCount: number;
         availableLotCount: number;
@@ -244,6 +294,7 @@ export const seedDefaultPhases = mutationGeneric({
         number: phase.number,
         name: phase.name,
         sectionsLabel: phase.sectionsLabel,
+        sectionNames: phase.sectionNames,
         stage: phase.stage,
         plannedLotCount: phase.plannedLotCount,
         availableLotCount: phase.availableLotCount,

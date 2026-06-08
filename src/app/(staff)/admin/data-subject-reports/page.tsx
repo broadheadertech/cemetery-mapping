@@ -111,7 +111,7 @@ export default function DataSubjectReportsPage(): ReactElement {
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       <header className="space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight">
+        <h1 className="font-display text-4xl font-semibold tracking-tight">
           Data subject reports
         </h1>
         <p className="max-w-3xl text-sm text-slate-600">
@@ -228,7 +228,7 @@ export default function DataSubjectReportsPage(): ReactElement {
           disabled={!canSubmit}
           onClick={handleSubmit}
           data-testid="generate-report-button"
-          className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded-md bg-[#1D5C4D] px-4 py-2 text-sm font-medium text-white hover:bg-[#144437] disabled:cursor-not-allowed disabled:opacity-60"
         >
           {submitting ? "Generating…" : "Generate report"}
         </button>

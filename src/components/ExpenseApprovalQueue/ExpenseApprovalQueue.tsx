@@ -166,7 +166,7 @@ export function ExpenseApprovalQueue({
           className="overflow-x-auto rounded-md border border-slate-200 bg-white"
         >
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
+            <thead className="bg-[#F6F2EA] text-left font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#8E8C85]">
               <tr>
                 <th scope="col" className="px-4 py-3">
                   Paid
@@ -331,7 +331,7 @@ function RejectExpenseDialogBody({
           aria-invalid={tooShort || tooLong}
           aria-describedby="expense-approval-reject-reason-counter"
           placeholder="e.g. Receipt photo is unreadable — please rescan and resubmit."
-          className="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
+          className="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-[#1D5C4D] focus:outline-none focus:ring-1 focus:ring-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
         />
         <div
           id="expense-approval-reject-reason-counter"

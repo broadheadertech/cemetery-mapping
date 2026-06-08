@@ -54,7 +54,7 @@ export default function AdminEmailBouncesPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Bounced emails</h1>
+        <h1 className="font-display text-4xl font-semibold tracking-tight">Bounced emails</h1>
         <p className="mt-1 max-w-2xl text-sm text-slate-600">
           Customers whose reminder email hard-bounced or filed a spam
           complaint. They are skipped by the reminder scan until their
@@ -86,7 +86,7 @@ export default function AdminEmailBouncesPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm" data-testid="email-bounces-table">
               <thead>
-                <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+                <tr className="border-b border-[#E1DAC8] bg-[#F6F2EA] font-mono text-[10px] uppercase tracking-[0.12em] text-[#8E8C85]">
                   <th className="px-4 py-3 font-medium">Customer</th>
                   <th className="px-4 py-3 font-medium">Email</th>
                   <th className="px-4 py-3 font-medium">Bounced</th>

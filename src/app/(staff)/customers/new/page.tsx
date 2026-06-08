@@ -28,7 +28,7 @@ export default function NewCustomerPage() {
   const router = useRouter();
   return (
     <div className="mx-auto max-w-3xl space-y-6">
-      <h1 className="text-3xl font-bold tracking-tight">New Customer</h1>
+      <h1 className="font-display text-4xl font-semibold tracking-tight">New Customer</h1>
       <p className="text-sm text-slate-600">
         Record a new customer with their contact details, address, and
         government ID. Capturing Data Privacy Act consent is required before

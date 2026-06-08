@@ -302,7 +302,7 @@ export function ArAgingTable({
           className="w-full text-sm"
           data-testid="ar-aging-table"
         >
-          <thead className="bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
+          <thead className="bg-[#F6F2EA] text-left font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#8E8C85]">
             <tr>
               <th scope="col" className="px-4 py-3">
                 Status

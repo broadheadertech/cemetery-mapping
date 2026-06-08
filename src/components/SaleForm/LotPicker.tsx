@@ -25,7 +25,7 @@
  * via the same props shape.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "convex/react";
 import { makeFunctionReference } from "convex/server";
 
@@ -71,6 +71,16 @@ export interface LotPickerProps {
   disabled?: boolean;
   /** Test id forwarded onto the underlying select for E2E targeting. */
   testId?: string;
+  /**
+   * Deep-link support: when the caller arrives via `/sales/new?lotId=…`
+   * (e.g. "Start sale" from a lot's detail page or the map), this lot is
+   * auto-selected once the available-lots list loads — saving the
+   * operator from re-finding the lot they just clicked. Fires at most
+   * once, and only if the lot is still Available; if it has since sold
+   * (or isn't found), the picker stays empty so the operator picks
+   * manually rather than silently selecting the wrong lot.
+   */
+  autoSelectLotId?: string;
 }
 
 export function LotPicker({
@@ -78,11 +88,35 @@ export function LotPicker({
   onSelect,
   disabled = false,
   testId = "sale-lot-picker",
+  autoSelectLotId,
 }: LotPickerProps) {
   const [search, setSearch] = useState("");
 
   const lots = useQuery(listLotsRef, { statusFilter: "available" });
   const isLoading = lots === undefined;
+
+  // Auto-select the deep-linked lot exactly once, after the reactive
+  // available-lots list resolves. The ref guard prevents re-firing when
+  // `onSelect` (an un-memoised parent callback) changes identity on the
+  // re-render its own state update triggers.
+  const autoSelectedRef = useRef(false);
+  useEffect(() => {
+    if (autoSelectedRef.current) return;
+    if (autoSelectLotId === undefined || autoSelectLotId === "") return;
+    if (value !== "") return;
+    if (lots === undefined) return;
+    const lot = lots.find((l) => l._id === autoSelectLotId && !l.isRetired);
+    if (lot === undefined) return;
+    autoSelectedRef.current = true;
+    onSelect({
+      lotId: lot._id,
+      code: lot.code,
+      section: lot.section,
+      block: lot.block,
+      row: lot.row,
+      basePriceCents: lot.basePriceCents,
+    });
+  }, [autoSelectLotId, value, lots, onSelect]);
 
   const filtered = useMemo<LotRow[]>(() => {
     if (lots === undefined) return [];

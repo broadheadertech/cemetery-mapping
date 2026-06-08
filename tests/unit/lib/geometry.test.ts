@@ -24,15 +24,27 @@ import {
  *   - `intersectsBbox` covers overlap / disjoint / touching / contained.
  *   - `strokeWidthForBbox` + `placeholderRadiusForBbox` scale with bbox
  *     width and never return zero / negative.
- *   - `DEFAULT_CEMETERY_BBOX` sane (positive area, centred near Manila).
+ *   - `DEFAULT_CEMETERY_BBOX` sane (positive area, centred on the real
+ *     cemetery in Aringay, La Union, and containing the seeded lots).
  */
 
+// Apostle Paul Memorial Park, Aringay, La Union — the base coordinate the
+// demo seed (`convex/seed.ts`) places lots around. The default viewport
+// MUST contain this point, or the map renders empty (regression guard).
+const ARINGAY_BASE = { lat: 16.3955, lng: 120.3585 };
+
 describe("DEFAULT_CEMETERY_BBOX", () => {
-  it("is centred near the Manila placeholder coordinate", () => {
-    expect(DEFAULT_CEMETERY_BBOX.bboxMinLat).toBeLessThan(14.68);
-    expect(DEFAULT_CEMETERY_BBOX.bboxMaxLat).toBeGreaterThan(14.67);
-    expect(DEFAULT_CEMETERY_BBOX.bboxMinLng).toBeLessThan(121.05);
-    expect(DEFAULT_CEMETERY_BBOX.bboxMaxLng).toBeGreaterThan(121.03);
+  it("is centred on the cemetery in Aringay, La Union", () => {
+    expect(DEFAULT_CEMETERY_BBOX.bboxMinLat).toBeLessThan(16.4);
+    expect(DEFAULT_CEMETERY_BBOX.bboxMaxLat).toBeGreaterThan(16.39);
+    expect(DEFAULT_CEMETERY_BBOX.bboxMinLng).toBeLessThan(120.36);
+    expect(DEFAULT_CEMETERY_BBOX.bboxMaxLng).toBeGreaterThan(120.355);
+  });
+  it("contains the seeded lot base coordinate", () => {
+    expect(ARINGAY_BASE.lat).toBeGreaterThan(DEFAULT_CEMETERY_BBOX.bboxMinLat);
+    expect(ARINGAY_BASE.lat).toBeLessThan(DEFAULT_CEMETERY_BBOX.bboxMaxLat);
+    expect(ARINGAY_BASE.lng).toBeGreaterThan(DEFAULT_CEMETERY_BBOX.bboxMinLng);
+    expect(ARINGAY_BASE.lng).toBeLessThan(DEFAULT_CEMETERY_BBOX.bboxMaxLng);
   });
   it("has a positive area", () => {
     expect(DEFAULT_CEMETERY_BBOX.bboxMaxLat).toBeGreaterThan(

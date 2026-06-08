@@ -44,7 +44,7 @@ export default function NewLotPage() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      <h1 className="text-3xl font-bold tracking-tight">New Lot</h1>
+      <h1 className="font-display text-4xl font-semibold tracking-tight">New Lot</h1>
       <p className="text-sm text-slate-600">
         Add a new lot to the inventory. Geometry is set to the cemetery
         centroid for now; survey data hydrates in Story 1.9.

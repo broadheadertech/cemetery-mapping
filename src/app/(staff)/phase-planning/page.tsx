@@ -65,6 +65,7 @@ interface PhaseOverviewRow {
   soldCount: number;
   sellThroughPercent: number;
   runwayMonths: number | null;
+  dataSource: "live" | "seeded";
 }
 
 interface PhasePlanningOverview {
@@ -194,6 +195,14 @@ export default function PhasePlanningPage() {
                 }}
               />
             </div>
+          )}
+
+          {live && (
+            <p className="-mt-2 font-mono text-[10.5px] uppercase tracking-[0.12em] text-text-muted">
+              {live.dataSource === "live"
+                ? `Sell-through & runway computed live from ${live.plannedLotCount.toLocaleString()} lots in this parcel.`
+                : "Illustrative figures — seed phases and load real lots to compute these live."}
+            </p>
           )}
 
           {/* Survey pipeline */}

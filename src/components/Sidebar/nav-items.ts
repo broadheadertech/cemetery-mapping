@@ -13,6 +13,7 @@ import {
   Wallet,
   FileBarChart,
   FileText,
+  Building2,
   Shield,
   CalendarDays,
   PhoneCall,
@@ -66,125 +67,172 @@ export interface NavItem {
   badgeSource?: NavItemBadgeSource;
 }
 
-export const NAV_ITEMS: ReadonlyArray<NavItem> = [
+/**
+ * A titled cluster of nav items. The operations design system groups the
+ * sidebar into labelled sections (Overview / Sales & Records / Finance /
+ * Operations / Admin) with a mono uppercase section header above each —
+ * this is the single source of truth for that structure.
+ */
+export interface NavGroup {
+  /** Section header (mono uppercase in the rail). */
+  label: string;
+  items: ReadonlyArray<NavItem>;
+}
+
+export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
   {
-    href: "/dashboard",
-    label: "Dashboard",
-    icon: LayoutDashboard,
-    requiredRoles: ["admin", "office_staff", "field_worker"],
+    label: "Overview",
+    items: [
+      {
+        href: "/dashboard",
+        label: "Dashboard",
+        icon: LayoutDashboard,
+        requiredRoles: ["admin", "office_staff", "field_worker"],
+      },
+      {
+        href: "/lots",
+        label: "Lots",
+        icon: MapPin,
+        requiredRoles: ["admin", "office_staff", "field_worker"],
+      },
+    ],
   },
   {
-    href: "/lots",
-    label: "Lots",
-    icon: MapPin,
-    requiredRoles: ["admin", "office_staff", "field_worker"],
+    label: "Sales & Records",
+    items: [
+      {
+        href: "/customers",
+        label: "Customers",
+        icon: Users,
+        requiredRoles: ["admin", "office_staff"],
+      },
+      {
+        href: "/sales",
+        label: "Sales",
+        icon: Receipt,
+        requiredRoles: ["admin", "office_staff"],
+      },
+      {
+        href: "/contracts",
+        label: "Contracts",
+        icon: FileText,
+        requiredRoles: ["admin", "office_staff"],
+      },
+      {
+        href: "/family-estates",
+        label: "Family Estates",
+        icon: Building2,
+        requiredRoles: ["admin", "office_staff"],
+      },
+    ],
   },
   {
-    href: "/customers",
-    label: "Customers",
-    icon: Users,
-    requiredRoles: ["admin", "office_staff"],
+    label: "Finance",
+    items: [
+      {
+        href: "/payments",
+        label: "Payments",
+        icon: CreditCard,
+        requiredRoles: ["admin", "office_staff"],
+      },
+      {
+        href: "/receipts",
+        label: "Receipts",
+        icon: Receipt,
+        requiredRoles: ["admin", "office_staff"],
+      },
+      {
+        href: "/ar-aging",
+        label: "AR Aging",
+        icon: TrendingUp,
+        requiredRoles: ["admin", "office_staff"],
+      },
+      {
+        href: "/follow-ups",
+        label: "Follow-ups",
+        icon: PhoneCall,
+        requiredRoles: ["admin", "office_staff"],
+      },
+      {
+        href: "/expenses",
+        label: "Expenses",
+        icon: Wallet,
+        requiredRoles: ["admin", "office_staff"],
+      },
+    ],
   },
   {
-    href: "/sales",
-    label: "Sales",
-    icon: Receipt,
-    requiredRoles: ["admin", "office_staff"],
+    label: "Operations",
+    items: [
+      {
+        href: "/interments",
+        label: "Interments",
+        icon: CalendarDays,
+        requiredRoles: ["admin", "office_staff"],
+      },
+      {
+        // Story 7.5 — combined consecration + interment calendar.
+        href: "/ceremonies/calendar",
+        label: "Ceremonies",
+        icon: CalendarDays,
+        requiredRoles: ["admin", "office_staff"],
+      },
+      {
+        // Phase Planning — development-parcel runway, survey pipeline, and
+        // the 6-step mapping playbook. Back-office surface (no field worker).
+        href: "/phase-planning",
+        label: "Phase Planning",
+        icon: Boxes,
+        requiredRoles: ["admin", "office_staff"],
+      },
+    ],
   },
   {
-    href: "/contracts",
-    label: "Contracts",
-    icon: FileText,
-    requiredRoles: ["admin", "office_staff"],
-  },
-  {
-    href: "/payments",
-    label: "Payments",
-    icon: CreditCard,
-    requiredRoles: ["admin", "office_staff"],
-  },
-  {
-    href: "/receipts",
-    label: "Receipts",
-    icon: Receipt,
-    requiredRoles: ["admin", "office_staff"],
-  },
-  {
-    href: "/ar-aging",
-    label: "AR Aging",
-    icon: TrendingUp,
-    requiredRoles: ["admin", "office_staff"],
-  },
-  {
-    href: "/follow-ups",
-    label: "Follow-ups",
-    icon: PhoneCall,
-    requiredRoles: ["admin", "office_staff"],
-  },
-  {
-    href: "/expenses",
-    label: "Expenses",
-    icon: Wallet,
-    requiredRoles: ["admin", "office_staff"],
-  },
-  {
-    href: "/interments",
-    label: "Interments",
-    icon: CalendarDays,
-    requiredRoles: ["admin", "office_staff"],
-  },
-  {
-    // Story 7.5 — combined consecration + interment calendar.
-    href: "/ceremonies/calendar",
-    label: "Ceremonies",
-    icon: CalendarDays,
-    requiredRoles: ["admin", "office_staff"],
-  },
-  {
-    // Phase Planning — development-parcel runway, survey pipeline, and
-    // the 6-step mapping playbook. Back-office surface (no field worker).
-    href: "/phase-planning",
-    label: "Phase Planning",
-    icon: Boxes,
-    requiredRoles: ["admin", "office_staff"],
-  },
-  {
-    href: "/reports",
-    label: "Reports",
-    icon: FileBarChart,
-    requiredRoles: ["admin"],
-  },
-  {
-    href: "/admin/expense-approvals",
-    label: "Expense approvals",
-    icon: ClipboardCheck,
-    requiredRoles: ["admin"],
-    badgeSource: "pendingExpenseApprovals",
-  },
-  {
-    // Story 9.9 — trailing-12-month trend visualisation. Admin-only;
-    // the destination page hosts the SVG chart driven by
-    // `convex/trends.ts → getTrendData`.
-    href: "/admin/trends",
-    label: "Trends",
-    icon: LineChart,
-    requiredRoles: ["admin"],
-  },
-  {
-    // Story 9.8 — customers whose reminder email hard-bounced; staff
-    // follow up by phone. Driven by `reminders:getBouncedEmailCustomers`.
-    href: "/admin/reports/email-bounces",
-    label: "Bounced emails",
-    icon: PhoneCall,
-    requiredRoles: ["admin", "office_staff"],
-  },
-  {
-    href: "/admin",
     label: "Admin",
-    icon: Shield,
-    requiredRoles: ["admin"],
+    items: [
+      {
+        href: "/reports",
+        label: "Reports",
+        icon: FileBarChart,
+        requiredRoles: ["admin"],
+      },
+      {
+        href: "/admin/expense-approvals",
+        label: "Expense approvals",
+        icon: ClipboardCheck,
+        requiredRoles: ["admin"],
+        badgeSource: "pendingExpenseApprovals",
+      },
+      {
+        // Story 9.9 — trailing-12-month trend visualisation. Admin-only;
+        // the destination page hosts the SVG chart driven by
+        // `convex/trends.ts → getTrendData`.
+        href: "/admin/trends",
+        label: "Trends",
+        icon: LineChart,
+        requiredRoles: ["admin"],
+      },
+      {
+        // The admin hub — staff accounts, settings, compliance, and the
+        // back-office tools (incl. bounced-email follow-ups) that don't
+        // each warrant a top-level rail entry.
+        href: "/admin",
+        label: "Admin",
+        icon: Shield,
+        requiredRoles: ["admin"],
+      },
+    ],
   },
 ];
+
+/**
+ * Flattened nav list — derived from {@link NAV_GROUPS} so the grouped
+ * sidebar and any flat consumer (search palette, tests) share one source
+ * of truth. Order matches top-to-bottom rail order.
+ */
+export const NAV_ITEMS: ReadonlyArray<NavItem> = NAV_GROUPS.flatMap(
+  (group) => group.items,
+);
 
 /**
  * Convex function reference for the pending-approvals count. Defined
@@ -216,15 +264,18 @@ const listPendingApprovalsForBadgeRef = makeFunctionReference<
  * here when a future story introduces another reactive badge.
  */
 export function useNavItemBadgeCount(item: NavItem): number | undefined {
-  // Hooks must be called unconditionally — we always call the query
-  // and short-circuit on the source check. When the source is not
-  // `pendingExpenseApprovals`, Convex returns `skip: true` semantics
-  // by way of the query body itself; here we just discard the result.
-  const pending = useQuery(listPendingApprovalsForBadgeRef, {});
-  if (item.badgeSource !== "pendingExpenseApprovals") {
-    return undefined;
-  }
-  if (pending === undefined) {
+  // Hooks must be called unconditionally, but the query MUST NOT run for
+  // items without this badge source — `listPendingApprovals` is admin-
+  // gated and would throw FORBIDDEN (or SESSION_EXPIRED on a stale auth
+  // token) for every other nav item. Passing `"skip"` keeps the hook
+  // call unconditional while leaving the subscription dormant unless the
+  // item genuinely opts in.
+  const enabled = item.badgeSource === "pendingExpenseApprovals";
+  const pending = useQuery(
+    listPendingApprovalsForBadgeRef,
+    enabled ? {} : "skip",
+  );
+  if (!enabled || pending === undefined) {
     return undefined;
   }
   return pending.length;
@@ -242,6 +293,24 @@ export function filterNavItems(
   return items.filter((item) =>
     item.requiredRoles.some((required) => roles.includes(required)),
   );
+}
+
+/**
+ * Filter nav GROUPS by the caller's roles: each group keeps only the
+ * items the user may see, and groups left empty are dropped entirely so
+ * the rail never renders a dangling section header.
+ */
+export function filterNavGroups(
+  groups: ReadonlyArray<NavGroup>,
+  roles: ReadonlyArray<string>,
+): ReadonlyArray<NavGroup> {
+  if (roles.length === 0) return [];
+  return groups
+    .map((group) => ({
+      ...group,
+      items: filterNavItems(group.items, roles),
+    }))
+    .filter((group) => group.items.length > 0);
 }
 
 /**

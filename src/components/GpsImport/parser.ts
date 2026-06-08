@@ -492,12 +492,9 @@ function parseCsvShape(text: string): ParseResult {
       "CSV header is missing a `lotCode` column.",
     );
   }
-  if (wktIdx === -1) {
-    throw new GpsImportParseError(
-      "INVALID_CSV",
-      "CSV header is missing a `polygonWKT` column.",
-    );
-  }
+  // `polygonWKT` is OPTIONAL. A row may instead carry just `lat`/`lng`
+  // (a centre point) and we auto-generate a small footprint around it —
+  // the "centre-point only" path. Only `lotCode` is a hard-required column.
 
   const items: ParsedImportItem[] = [];
   const featureErrors: ParseFeatureError[] = [];
@@ -515,32 +512,18 @@ function parseCsvShape(text: string): ParseResult {
       });
       continue;
     }
-    const wktRaw = cells[wktIdx] !== undefined ? cells[wktIdx]!.trim() : "";
-    if (wktRaw.length === 0) {
-      featureErrors.push({
-        featureIndex: row - 1,
-        lotCode: lotCodeRaw,
-        reason: "Missing `polygonWKT`.",
-      });
-      continue;
-    }
-    const polygon = parseWktPolygon(wktRaw);
-    if (polygon === null) {
-      featureErrors.push({
-        featureIndex: row - 1,
-        lotCode: lotCodeRaw,
-        reason:
-          "`polygonWKT` could not be parsed. Expected `POLYGON((lng lat, lng lat, ...))`.",
-      });
-      continue;
-    }
 
-    const out: ParsedImportItem = { lotCode: lotCodeRaw, polygon };
+    // Optional centre point (lat,lng) — supply both or neither.
+    let centroid: ParsedLatLng | undefined;
     if (latIdx !== -1 || lngIdx !== -1) {
-      const latRaw = latIdx !== -1 ? cells[latIdx] : undefined;
-      const lngRaw = lngIdx !== -1 ? cells[lngIdx] : undefined;
-      const latStr = latRaw !== undefined ? latRaw.trim() : "";
-      const lngStr = lngRaw !== undefined ? lngRaw.trim() : "";
+      const latStr =
+        latIdx !== -1 && cells[latIdx] !== undefined
+          ? cells[latIdx]!.trim()
+          : "";
+      const lngStr =
+        lngIdx !== -1 && cells[lngIdx] !== undefined
+          ? cells[lngIdx]!.trim()
+          : "";
       if (latStr.length > 0 || lngStr.length > 0) {
         const lat = Number(latStr);
         const lng = Number(lngStr);
@@ -553,14 +536,47 @@ function parseCsvShape(text: string): ParseResult {
           featureErrors.push({
             featureIndex: row - 1,
             lotCode: lotCodeRaw,
-            reason: "Centroid `lat`/`lng` are not both numeric.",
+            reason: "Centroid `lat`/`lng` must both be present and numeric.",
           });
           continue;
         }
-        out.centroid = { lat, lng };
+        centroid = { lat, lng };
       }
     }
 
+    // Geometry: an explicit polygonWKT wins; otherwise auto-generate a
+    // small footprint around the centre point.
+    const wktRaw =
+      wktIdx !== -1 && cells[wktIdx] !== undefined ? cells[wktIdx]!.trim() : "";
+    let polygon: ParsedLatLng[];
+    if (wktRaw.length > 0) {
+      const parsed = parseWktPolygon(wktRaw);
+      if (parsed === null) {
+        featureErrors.push({
+          featureIndex: row - 1,
+          lotCode: lotCodeRaw,
+          reason:
+            "`polygonWKT` could not be parsed. Expected `POLYGON((lng lat, lng lat, ...))`.",
+        });
+        continue;
+      }
+      polygon = parsed;
+    } else if (centroid !== undefined) {
+      polygon = rectangleAround(centroid.lat, centroid.lng);
+    } else {
+      featureErrors.push({
+        featureIndex: row - 1,
+        lotCode: lotCodeRaw,
+        reason:
+          "Provide a `polygonWKT`, or `lat` & `lng` to auto-place the lot.",
+      });
+      continue;
+    }
+
+    const out: ParsedImportItem = { lotCode: lotCodeRaw, polygon };
+    if (centroid !== undefined) {
+      out.centroid = centroid;
+    }
     items.push(out);
   }
 
@@ -672,4 +688,35 @@ function parseWktPolygon(raw: string): ParsedLatLng[] | null {
   }
   if (polygon.length === 0) return null;
   return polygon;
+}
+
+/**
+ * Default footprint (metres) used by the "centre-point only" import path.
+ * A single-grave-sized rectangle — the centroid is the meaningful datum;
+ * the footprint is just a sensible default box so the lot has a shape on
+ * the map without surveying every corner. Replace later via a real
+ * polygon import once corners are surveyed.
+ */
+const AUTO_FOOTPRINT_WIDTH_M = 1.0;
+const AUTO_FOOTPRINT_DEPTH_M = 2.4;
+
+/**
+ * Build a small north-aligned rectangle centred on (lat, lng). The four
+ * corners are symmetric about the centre, so the polygon's vertex-average
+ * centroid equals the supplied point exactly — it sails through the
+ * centroid-sanity check. Returns 4 distinct corners (no closing
+ * duplicate; the schema doesn't require one).
+ */
+function rectangleAround(lat: number, lng: number): ParsedLatLng[] {
+  const metersPerDegLat = 111320;
+  const cosLat = Math.cos((lat * Math.PI) / 180);
+  const metersPerDegLng = 111320 * (cosLat === 0 ? 1 : cosLat);
+  const dLat = AUTO_FOOTPRINT_DEPTH_M / 2 / metersPerDegLat;
+  const dLng = AUTO_FOOTPRINT_WIDTH_M / 2 / metersPerDegLng;
+  return [
+    { lat: lat - dLat, lng: lng - dLng },
+    { lat: lat - dLat, lng: lng + dLng },
+    { lat: lat + dLat, lng: lng + dLng },
+    { lat: lat + dLat, lng: lng - dLng },
+  ];
 }

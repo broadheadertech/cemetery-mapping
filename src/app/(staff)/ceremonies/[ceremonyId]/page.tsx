@@ -105,7 +105,7 @@ export default function CeremonyDetailPage({ params }: PageProps) {
   if (detail === null) {
     return (
       <div className="space-y-4">
-        <h1 className="text-3xl font-bold tracking-tight">Ceremony not found</h1>
+        <h1 className="font-display text-4xl font-semibold tracking-tight">Ceremony not found</h1>
         <p className="text-sm text-slate-600">
           The ceremony you requested does not exist or has been removed.
         </p>
@@ -194,7 +194,7 @@ export default function CeremonyDetailPage({ params }: PageProps) {
             </span>
           ) : null}
         </div>
-        <h1 className="text-3xl font-bold tracking-tight">
+        <h1 className="font-display text-4xl font-semibold tracking-tight">
           {kindLabel} for {detail.customerName}
         </h1>
         <p className="text-sm text-slate-600">

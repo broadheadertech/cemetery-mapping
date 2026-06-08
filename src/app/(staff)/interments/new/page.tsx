@@ -202,7 +202,7 @@ export default function NewIntermentPage() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      <h1 className="text-3xl font-bold tracking-tight">Schedule interment</h1>
+      <h1 className="font-display text-4xl font-semibold tracking-tight">Schedule interment</h1>
       <p className="text-sm text-slate-600">
         Pick a lot, choose an occupant on that lot, and set the date and time.
         To record a new occupant inline, open the lot’s detail page first.

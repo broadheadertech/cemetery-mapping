@@ -59,18 +59,23 @@ export type LotGeometry = {
 
 /**
  * Cemetery-wide default bbox. Used as the initial map viewport before
- * the user pans or zooms. Centred on the Manila placeholder centroid
- * with a generous 0.01° half-width (≈ 1.1 km) so all placeholder lots
- * (which collapse to the centroid) fall comfortably inside the frame.
+ * the user pans or zooms. Centred on Apostle Paul Memorial Park in
+ * Aringay, La Union (≈ 16.3955 N, 120.3585 E) with a generous 0.01°
+ * half-width (≈ 1.1 km) so every lot falls comfortably inside the frame.
  *
- * Once real GPS-surveyed geometry lands (Epic 5+), this constant can
- * be tightened to the actual cemetery footprint — a one-line change.
+ * NOTE: this MUST track wherever lot geometry actually lives — the demo
+ * seed (`convex/seed.ts`, `BASE_LAT`/`BASE_LNG`) places lots here. An
+ * earlier Manila placeholder (14.67 N, 121.04 E) left the map empty
+ * because the viewport query found no lots ~200 km to the south.
+ *
+ * Once real GPS-surveyed geometry lands, this constant can be tightened
+ * to the actual cemetery footprint — a one-line change.
  */
 export const DEFAULT_CEMETERY_BBOX: Bbox = {
-  bboxMinLat: 14.6660,
-  bboxMaxLat: 14.6860,
-  bboxMinLng: 121.0337,
-  bboxMaxLng: 121.0537,
+  bboxMinLat: 16.3855,
+  bboxMaxLat: 16.4055,
+  bboxMinLng: 120.3485,
+  bboxMaxLng: 120.3685,
 };
 
 /**

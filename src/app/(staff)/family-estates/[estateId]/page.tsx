@@ -74,7 +74,7 @@ export default function FamilyEstateDetailPage() {
     <div className="mx-auto max-w-3xl space-y-6">
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">{estate.name}</h1>
+          <h1 className="font-display text-4xl font-semibold tracking-tight">{estate.name}</h1>
           <p className="text-sm text-slate-600">
             {estate.lots.length} lots ·{" "}
             {estate.isActive ? (

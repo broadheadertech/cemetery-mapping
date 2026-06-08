@@ -276,7 +276,7 @@ export default function ReceiptDetailPage() {
   if (receipt === null) {
     return (
       <div className="space-y-4" data-testid="receipt-not-found">
-        <h1 className="text-3xl font-bold tracking-tight text-text-default">
+        <h1 className="font-display text-4xl font-semibold tracking-tight text-text-default">
           Receipt not found
         </h1>
         <div

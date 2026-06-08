@@ -111,7 +111,7 @@ export default function EditLotPage() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      <h1 className="text-3xl font-bold tracking-tight">{heading}</h1>
+      <h1 className="font-display text-4xl font-semibold tracking-tight">{heading}</h1>
       {lot === undefined && (
         <p className="text-sm text-slate-500">Loading lot…</p>
       )}

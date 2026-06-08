@@ -257,6 +257,34 @@ describe("parseGpsBatch — CSV shape (Story 8.1 HIGH-fix)", () => {
     });
   });
 
+  it("auto-generates a footprint from lat/lng when polygonWKT is blank (centre-point path)", () => {
+    const csv = ["lotCode,lat,lng,polygonWKT", "A-101,16.4205,120.3412,"].join(
+      "\n",
+    );
+    const result = parseGpsBatch(csv);
+    expect(result.featureErrors).toHaveLength(0);
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]!.lotCode).toBe("A-101");
+    // A 4-corner box is generated around the supplied centre point.
+    expect(result.items[0]!.polygon).toHaveLength(4);
+    expect(result.items[0]!.centroid).toEqual({ lat: 16.4205, lng: 120.3412 });
+  });
+
+  it("accepts a CSV with no polygonWKT column at all (lat/lng only)", () => {
+    const csv = ["lotCode,lat,lng", "A-102,16.4205,120.3414"].join("\n");
+    const result = parseGpsBatch(csv);
+    expect(result.featureErrors).toHaveLength(0);
+    expect(result.items[0]!.polygon).toHaveLength(4);
+  });
+
+  it("errors a row carrying neither polygonWKT nor lat/lng", () => {
+    const csv = ["lotCode,lat,lng,polygonWKT", "A-103,,,"].join("\n");
+    const result = parseGpsBatch(csv);
+    expect(result.items).toHaveLength(0);
+    expect(result.featureErrors).toHaveLength(1);
+    expect(result.featureErrors[0]!.lotCode).toBe("A-103");
+  });
+
   it("reports a feature error for a malformed WKT polygon", () => {
     const csv = ["lotCode,polygonWKT", "D-5-12,not-a-polygon"].join("\n");
     const result = parseGpsBatch(csv);

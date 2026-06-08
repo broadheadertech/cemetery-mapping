@@ -260,7 +260,10 @@ export default function DashboardPage(): ReactElement {
       <ReconciliationBanner />
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div className="space-y-1">
-          <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+          <p className="font-mono text-[11px] font-medium uppercase tracking-[0.18em] text-[#1D5C4D]">
+            Owner Dashboard
+          </p>
+          <h1 className="font-display text-4xl font-semibold tracking-tight">Dashboard</h1>
           <p className="text-sm text-slate-600">
             {period === "ytd"
               ? "Year-to-date sales, collections, and operating performance."
@@ -507,7 +510,7 @@ function PeriodToggle({ period, onChange }: PeriodToggleProps): ReactElement {
       role="group"
       aria-label="Date range"
       data-testid="dashboard-period-toggle"
-      className="inline-flex overflow-hidden rounded-md border border-slate-300 bg-white"
+      className="inline-flex items-center gap-1.5"
     >
       <button
         type="button"
@@ -516,8 +519,8 @@ function PeriodToggle({ period, onChange }: PeriodToggleProps): ReactElement {
         data-testid="dashboard-period-mtd"
         className={
           period === "mtd"
-            ? "min-h-[44px] min-w-[44px] bg-slate-900 px-4 py-2 text-sm font-medium text-white"
-            : "min-h-[44px] min-w-[44px] bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            ? "min-h-[44px] rounded-full bg-[#1D5C4D] px-5 py-2 text-sm font-semibold text-white"
+            : "min-h-[44px] rounded-full border border-[#E1DAC8] bg-white px-5 py-2 text-sm font-semibold text-[#8E8C85] transition-colors hover:border-[#C9A96B] hover:text-[#1D5C4D]"
         }
       >
         MTD
@@ -529,8 +532,8 @@ function PeriodToggle({ period, onChange }: PeriodToggleProps): ReactElement {
         data-testid="dashboard-period-ytd"
         className={
           period === "ytd"
-            ? "min-h-[44px] min-w-[44px] bg-slate-900 px-4 py-2 text-sm font-medium text-white"
-            : "min-h-[44px] min-w-[44px] bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            ? "min-h-[44px] rounded-full bg-[#1D5C4D] px-5 py-2 text-sm font-semibold text-white"
+            : "min-h-[44px] rounded-full border border-[#E1DAC8] bg-white px-5 py-2 text-sm font-semibold text-[#8E8C85] transition-colors hover:border-[#C9A96B] hover:text-[#1D5C4D]"
         }
       >
         YTD

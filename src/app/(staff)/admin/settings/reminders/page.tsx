@@ -124,7 +124,7 @@ export default function ReminderSettingsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Payment reminders</h1>
+        <h1 className="font-display text-4xl font-semibold tracking-tight">Payment reminders</h1>
         <p className="mt-1 max-w-2xl text-sm text-slate-600">
           Controls the daily scan that emails customers about upcoming and
           overdue installments. Customers can opt out individually from
@@ -303,7 +303,7 @@ export default function ReminderSettingsPage() {
                 type="button"
                 onClick={handleSave}
                 disabled={busy}
-                className="rounded-md bg-slate-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-60"
+                className="rounded-md bg-[#1D5C4D] px-4 py-1.5 text-sm font-medium text-white hover:bg-[#144437] disabled:opacity-60"
                 data-testid="reminders-save"
               >
                 {busy ? "Saving…" : "Save cadence"}

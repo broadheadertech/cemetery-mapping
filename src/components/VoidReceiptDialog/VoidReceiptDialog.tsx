@@ -231,7 +231,7 @@ export function VoidReceiptDialog({
             rows={4}
             maxLength={MAX_REASON}
             placeholder="Why is this receipt being voided?"
-            className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
+            className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-[#1D5C4D] focus:outline-none focus:ring-1 focus:ring-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
           />
           <div
             data-testid="void-receipt-reason-counter"

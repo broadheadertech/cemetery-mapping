@@ -202,7 +202,7 @@ export default function AdminPerpetualCarePage(): React.ReactElement {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">
+        <h1 className="font-display text-4xl font-semibold tracking-tight">
           Perpetual care policy
         </h1>
         <p className="mt-1 text-sm text-slate-600">
@@ -446,7 +446,7 @@ export default function AdminPerpetualCarePage(): React.ReactElement {
               "min-h-[44px] rounded-md px-4 py-2 text-sm font-medium text-white",
               confirmPolicy
                 ? "bg-red-700 hover:bg-red-800"
-                : "bg-slate-900 hover:bg-slate-800",
+                : "bg-[#1D5C4D] hover:bg-[#144437]",
               "disabled:cursor-not-allowed disabled:opacity-60",
             )}
           >

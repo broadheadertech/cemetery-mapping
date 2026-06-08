@@ -157,7 +157,7 @@ function DownloadButton({ exportId }: DownloadButtonProps): ReactElement {
         type="button"
         onClick={handleClick}
         disabled={busy}
-        className="inline-flex min-h-[36px] items-center justify-center rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+        className="inline-flex min-h-[36px] items-center justify-center rounded-md bg-[#1D5C4D] px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-[#144437] disabled:cursor-not-allowed disabled:opacity-60"
       >
         {busy ? "Loading..." : "Download"}
       </button>
@@ -226,7 +226,7 @@ export default function AdminArchivalExportsPage(): ReactElement {
   return (
     <div className="space-y-6">
       <header className="space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight">Archival exports</h1>
+        <h1 className="font-display text-4xl font-semibold tracking-tight">Archival exports</h1>
         <p className="max-w-3xl text-sm text-slate-600">
           Monthly BIR archival exports of receipts, payments, customers, and
           contracts. The cron runs at 04:00 Manila on the 1st of each month
@@ -281,7 +281,7 @@ export default function AdminArchivalExportsPage(): ReactElement {
           <button
             type="submit"
             disabled={form.busy}
-            className="inline-flex min-h-[36px] items-center justify-center rounded-md bg-slate-900 px-4 py-1.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex min-h-[36px] items-center justify-center rounded-md bg-[#1D5C4D] px-4 py-1.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#144437] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {form.busy ? "Scheduling..." : "Run archival export now"}
           </button>

@@ -119,7 +119,7 @@ export default function LotConditionsPage() {
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <div className="flex items-center justify-between gap-3">
-        <h1 className="text-3xl font-bold tracking-tight">{heading}</h1>
+        <h1 className="font-display text-4xl font-semibold tracking-tight">{heading}</h1>
         {lot !== undefined && lot !== null && (
           <Link
             href={`/lots/${lot._id}`}

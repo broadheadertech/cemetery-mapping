@@ -458,7 +458,7 @@ export default function ContractDetailPage() {
   if (detail === undefined) {
     return (
       <div className="mx-auto max-w-3xl space-y-6">
-        <h1 className="text-3xl font-bold tracking-tight">Contract</h1>
+        <h1 className="font-display text-4xl font-semibold tracking-tight">Contract</h1>
         <div
           data-testid="contract-detail-loading"
           className="rounded-md border border-slate-200 bg-white p-6 text-sm text-slate-500"
@@ -641,7 +641,7 @@ export default function ContractDetailPage() {
             onClick={handleGeneratePdf}
             disabled={isGenerating || pdfState === undefined}
             data-testid="contract-pdf-generate-button"
-            className="inline-flex items-center rounded-md border border-slate-900 bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex items-center rounded-md border border-[#1D5C4D] bg-[#1D5C4D] px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-[#144437] disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isGenerating
               ? "Generating…"
@@ -769,7 +769,7 @@ export default function ContractDetailPage() {
                     ? "contract-demand-letter-not-overdue-hint"
                     : undefined
                 }
-                className="inline-flex items-center rounded-md border border-slate-900 bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex items-center rounded-md border border-[#1D5C4D] bg-[#1D5C4D] px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-[#144437] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isGeneratingDemandLetter
                   ? "Generating…"

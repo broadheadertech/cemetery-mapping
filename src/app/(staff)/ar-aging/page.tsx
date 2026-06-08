@@ -94,7 +94,7 @@ export default function ArAgingPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold tracking-tight">AR Aging</h1>
+        <h1 className="font-display text-4xl font-semibold tracking-tight">AR Aging</h1>
         <Link
           href="/dashboard"
           className="text-sm font-medium text-slate-600 hover:text-slate-900"
@@ -163,7 +163,7 @@ function BucketChip({
       className={cn(
         "inline-flex h-9 items-center rounded-full border px-3 text-sm font-medium transition-colors",
         active
-          ? "border-slate-900 bg-slate-900 text-white"
+          ? "border-[#1D5C4D] bg-[#1D5C4D] text-white"
           : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
       )}
     >

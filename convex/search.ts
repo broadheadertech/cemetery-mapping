@@ -143,6 +143,73 @@ export const searchAll = queryGeneric({
 });
 
 /**
+ * One grave hit for the "find a grave" map search. Carries the lot's
+ * centroid so the map can fly straight to it, plus the lot code + status
+ * so the result row is meaningful and the action menu can open.
+ */
+export interface GraveHit {
+  occupantName: string;
+  dateOfInterment?: number;
+  lotId: LotDoc["_id"];
+  lotCode: string;
+  section: string;
+  status: LotDoc["status"];
+  centroid: { lat: number; lng: number };
+}
+
+/**
+ * Find-a-grave — search interred occupants by name and return the lot
+ * each rests in, with coordinates so the map can fly there (Map cockpit,
+ * #2). Staff-scoped (the family-facing public variant is a separate
+ * portal query).
+ *
+ * A full scan of `occupants` with an in-memory substring match — the
+ * same approach `searchLots` takes for free-text, acceptable at the
+ * architecture's ~2,000-row target (ADR-0009 defers full-text search).
+ * `centroid` is always present (placeholder lots carry the default
+ * centroid), so a fly-to always has somewhere to go.
+ */
+export const findGrave = queryGeneric({
+  args: { query: v.string() },
+  handler: async (
+    ctx: QueryCtx,
+    args: { query: string },
+  ): Promise<GraveHit[]> => {
+    await requireRole(ctx, ["admin", "office_staff", "field_worker"]);
+    const q = args.query.trim().toLowerCase();
+    // Two-char floor keeps a single keystroke from scanning the table.
+    if (q.length < 2) return [];
+
+    const occupants = await ctx.db.query("occupants").collect();
+    const matches = occupants
+      .filter((o) => !o.isRemoved && o.name.toLowerCase().includes(q))
+      .slice(0, RESULT_LIMIT);
+
+    const hits: GraveHit[] = [];
+    for (const o of matches) {
+      const lot = await ctx.db.get(o.lotId);
+      if (lot === null || lot.isRetired) continue;
+      const hit: GraveHit = {
+        occupantName: o.name,
+        lotId: lot._id,
+        lotCode: lot.code,
+        section: lot.section,
+        status: lot.status,
+        centroid: {
+          lat: lot.geometry.centroid.lat,
+          lng: lot.geometry.centroid.lng,
+        },
+      };
+      if (o.dateOfInterment !== undefined) {
+        hit.dateOfInterment = o.dateOfInterment;
+      }
+      hits.push(hit);
+    }
+    return hits;
+  },
+});
+
+/**
  * Looks like a lot-code prefix when it is at least one character of
  * `[A-Z0-9-]`. A single capital letter such as `D` qualifies — the
  * `by_code` range will then pick up every code starting with `D`,

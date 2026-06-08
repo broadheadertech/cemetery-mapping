@@ -2,8 +2,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import {
   filterNavItems,
+  filterNavGroups,
   isNavItemActive,
   NAV_ITEMS,
+  NAV_GROUPS,
 } from "@/components/Sidebar/nav-items";
 import { Sidebar } from "@/components/Sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -21,6 +23,13 @@ vi.mock("@convex-dev/auth/react", () => ({
   useAuthActions: () => ({ signOut: vi.fn().mockResolvedValue(undefined) }),
 }));
 
+// The grouped nav renders NavLinks that subscribe to the pending-approvals
+// badge via Convex `useQuery`. Outside a ConvexProvider that would throw,
+// so we stub it to "loading" (undefined) — badges simply don't render.
+vi.mock("convex/react", () => ({
+  useQuery: () => undefined,
+}));
+
 function renderSidebar(
   overrides: Partial<React.ComponentProps<typeof Sidebar>> = {},
 ) {
@@ -28,8 +37,6 @@ function renderSidebar(
     <TooltipProvider>
       <Sidebar
         collapsed={false}
-        onToggleCollapse={() => {}}
-        onOpenSearch={() => {}}
         roles={["admin"]}
         user={{ name: "Maria Reyes", email: "maria@example.test" }}
         {...overrides}
@@ -76,6 +83,35 @@ describe("Sidebar nav-items helpers", () => {
   });
 });
 
+describe("filterNavGroups", () => {
+  it("returns nothing for empty roles", () => {
+    expect(filterNavGroups(NAV_GROUPS, [])).toHaveLength(0);
+  });
+
+  it("keeps every group for admin and flattens to all items", () => {
+    const groups = filterNavGroups(NAV_GROUPS, ["admin"]);
+    const flat = groups.flatMap((g) => g.items);
+    expect(flat).toHaveLength(NAV_ITEMS.length);
+    expect(groups.map((g) => g.label)).toContain("Overview");
+    expect(groups.map((g) => g.label)).toContain("Admin");
+  });
+
+  it("drops the Admin group entirely for field_worker (no visible items)", () => {
+    const groups = filterNavGroups(NAV_GROUPS, ["field_worker"]);
+    expect(groups.map((g) => g.label)).not.toContain("Admin");
+    // Overview survives — Dashboard/Map/Lots are field-visible.
+    expect(groups.map((g) => g.label)).toContain("Overview");
+  });
+
+  it("never yields an empty group", () => {
+    for (const roles of [["admin"], ["office_staff"], ["field_worker"]]) {
+      for (const group of filterNavGroups(NAV_GROUPS, roles)) {
+        expect(group.items.length).toBeGreaterThan(0);
+      }
+    }
+  });
+});
+
 describe("Sidebar component", () => {
   beforeEach(() => {
     cleanup();
@@ -83,46 +119,20 @@ describe("Sidebar component", () => {
 
   it("renders the dashboard nav item", () => {
     renderSidebar();
-    // The Sidebar renders the dashboard NavLink. usePathname is mocked
-    // to /dashboard so the link will have aria-current="page".
     expect(screen.getByText("Dashboard")).toBeInTheDocument();
   });
 
-  it("renders the search trigger with a Cmd-K hint", () => {
+  it("renders the mono-uppercase section headers", () => {
     renderSidebar();
-    const searchButton = screen.getByRole("button", { name: /search/i });
-    expect(searchButton).toBeInTheDocument();
-  });
-
-  it("calls onOpenSearch when the search trigger is clicked", () => {
-    const onOpenSearch = vi.fn();
-    renderSidebar({ onOpenSearch });
-    const searchButton = screen.getByRole("button", { name: /search/i });
-    searchButton.click();
-    expect(onOpenSearch).toHaveBeenCalledTimes(1);
-  });
-
-  it("calls onToggleCollapse from the collapse button", () => {
-    const onToggleCollapse = vi.fn();
-    renderSidebar({ onToggleCollapse });
-    const collapseButton = screen.getByRole("button", {
-      name: /collapse sidebar/i,
-    });
-    collapseButton.click();
-    expect(onToggleCollapse).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Overview")).toBeInTheDocument();
+    expect(screen.getByText("Sales & Records")).toBeInTheDocument();
+    expect(screen.getByText("Finance")).toBeInTheDocument();
   });
 
   it("renders in collapsed mode with data-collapsed=true", () => {
     const { container } = renderSidebar({ collapsed: true });
     const aside = container.querySelector("aside");
     expect(aside?.getAttribute("data-collapsed")).toBe("true");
-  });
-
-  it("hides the collapse toggle in forceExpanded mode", () => {
-    renderSidebar({ forceExpanded: true });
-    expect(
-      screen.queryByRole("button", { name: /collapse sidebar/i }),
-    ).not.toBeInTheDocument();
   });
 
   it("hides admin link when user lacks admin role", () => {

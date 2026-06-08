@@ -137,7 +137,7 @@ export default function TodayIntermentsPage() {
               </div>
               <Link
                 href={`/interments/${r.intermentId}/complete`}
-                className="mt-4 inline-flex min-h-[44px] w-full items-center justify-center rounded-md bg-slate-900 px-4 py-2 text-base font-medium text-white hover:bg-slate-800"
+                className="mt-4 inline-flex min-h-[44px] w-full items-center justify-center rounded-md bg-[#1D5C4D] px-4 py-2 text-base font-medium text-white hover:bg-[#144437]"
                 data-testid={`today-mark-complete-${r.intermentId}`}
               >
                 Mark complete

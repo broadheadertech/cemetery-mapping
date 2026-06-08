@@ -95,7 +95,7 @@ export default function TransferOwnershipPage() {
   if (detail === null) {
     return (
       <div className="mx-auto max-w-3xl space-y-4">
-        <h1 className="text-3xl font-bold tracking-tight text-slate-900">
+        <h1 className="font-display text-4xl font-semibold tracking-tight text-slate-900">
           Customer not found
         </h1>
         <div
@@ -128,7 +128,7 @@ export default function TransferOwnershipPage() {
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <header className="space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight text-slate-900">
+        <h1 className="font-display text-4xl font-semibold tracking-tight text-slate-900">
           Transfer ownership
         </h1>
         <p className="text-sm text-slate-600">

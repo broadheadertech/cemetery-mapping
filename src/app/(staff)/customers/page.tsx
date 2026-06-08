@@ -55,7 +55,7 @@ export default function CustomersPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Customers</h1>
+          <h1 className="font-display text-4xl font-semibold tracking-tight">Customers</h1>
           <p className="mt-1 max-w-2xl text-sm text-slate-600">
             Every customer the cemetery has on record. Press{" "}
             <kbd className="rounded border border-slate-300 bg-slate-50 px-1 text-xs">
@@ -67,7 +67,7 @@ export default function CustomersPage() {
         </div>
         <Link
           href="/customers/new"
-          className="shrink-0 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+          className="shrink-0 rounded-md bg-[#1D5C4D] px-4 py-2 text-sm font-medium text-white hover:bg-[#144437]"
           data-testid="customers-new-button"
         >
           New customer
@@ -88,7 +88,7 @@ export default function CustomersPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm" data-testid="customers-table">
               <thead>
-                <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+                <tr className="border-b border-[#E1DAC8] bg-[#F6F2EA] font-mono text-[10px] uppercase tracking-[0.12em] text-[#8E8C85]">
                   <th className="px-4 py-3 font-medium">Name</th>
                   <th className="px-4 py-3 font-medium">Phone</th>
                   <th className="px-4 py-3 font-medium">Email</th>

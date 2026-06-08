@@ -26,12 +26,14 @@
  */
 
 import { useCallback, useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Boxes } from "lucide-react";
+import { Boxes, Search } from "lucide-react";
+import { useQuery } from "convex/react";
+import { makeFunctionReference } from "convex/server";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { LOT_STATUSES, type LotStatus } from "@/types/lot-status";
 import { LotMap, type LotMapRenderer } from "@/components/LotMap";
+import { LotActionMenu } from "@/components/LotActionMenu";
 
 const CHIP_LABELS: Record<LotStatus, string> = {
   available: "Available",
@@ -43,8 +45,38 @@ const CHIP_LABELS: Record<LotStatus, string> = {
   transferred: "Transferred",
 };
 
+interface GraveHit {
+  occupantName: string;
+  dateOfInterment?: number;
+  lotId: string;
+  lotCode: string;
+  section: string;
+  status: LotStatus;
+  centroid: { lat: number; lng: number };
+}
+
+const findGraveRef = makeFunctionReference<
+  "query",
+  { query: string },
+  GraveHit[]
+>("search:findGrave");
+
 export default function CemeteryMapPage() {
-  const router = useRouter();
+  // Clicking a lot opens an action menu (view / sell / schedule / pay)
+  // rather than navigating straight to the record — the map becomes the
+  // place you act, not just look.
+  const [actionLotId, setActionLotId] = useState<string | null>(null);
+
+  // Find-a-grave: the point the map should fly to. A NEW object per pick
+  // so the renderer's focus effect re-fires even for the same lot.
+  const [focusPoint, setFocusPoint] = useState<{ lat: number; lng: number } | null>(
+    null,
+  );
+
+  const handlePickGrave = useCallback((hit: GraveHit) => {
+    setFocusPoint({ lat: hit.centroid.lat, lng: hit.centroid.lng });
+    setActionLotId(hit.lotId);
+  }, []);
 
   // Filter chips are multi-select. Empty set === show all statuses.
   const [activeStatuses, setActiveStatuses] = useState<ReadonlySet<LotStatus>>(
@@ -73,12 +105,9 @@ export default function CemeteryMapPage() {
     setActiveStatuses(new Set());
   }, []);
 
-  const handleLotClick = useCallback(
-    (lotId: string) => {
-      router.push(`/lots/${lotId}`);
-    },
-    [router],
-  );
+  const handleLotClick = useCallback((lotId: string) => {
+    setActionLotId(lotId);
+  }, []);
 
   // Pass `undefined` (rather than an empty array) when no filters are
   // selected so the hook's "show all" branch fires.
@@ -93,18 +122,21 @@ export default function CemeteryMapPage() {
     <div className="space-y-6">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Cemetery Map</h1>
+          <h1 className="font-display text-4xl font-semibold tracking-tight">Cemetery Map</h1>
           <p className="mt-1 text-sm text-text-muted">
-            Click any lot to view details. Filter chips narrow the visible
-            status set.
+            Search a name to find a grave, or click any lot for actions.
+            Filter chips narrow the visible status set.
           </p>
         </div>
-        <Link
-          href="/phase-3d"
-          className="inline-flex min-h-[38px] items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-fg transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-2"
-        >
-          <Boxes className="h-4 w-4" aria-hidden="true" /> 3D Phase View
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <GraveSearchBox onPick={handlePickGrave} />
+          <Link
+            href="/phase-3d"
+            className="inline-flex min-h-[38px] items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-fg transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-2"
+          >
+            <Boxes className="h-4 w-4" aria-hidden="true" /> 3D Phase View
+          </Link>
+        </div>
       </header>
 
       <div
@@ -184,7 +216,90 @@ export default function CemeteryMapPage() {
         onLotClick={handleLotClick}
         height={600}
         forceRenderer={forceRenderer}
+        focusPoint={focusPoint}
       />
+
+      <LotActionMenu
+        lotId={actionLotId}
+        onClose={() => setActionLotId(null)}
+      />
+    </div>
+  );
+}
+
+/**
+ * Find-a-grave search box. Type a name → matching interred occupants →
+ * pick one to fly the map to that lot and open its action menu. Reuses
+ * the `search:findGrave` query (full-scan substring match, Phase-1 scale).
+ */
+function GraveSearchBox({ onPick }: { onPick: (hit: GraveHit) => void }) {
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const trimmed = q.trim();
+  const results = useQuery(
+    findGraveRef,
+    trimmed.length >= 2 ? { query: trimmed } : "skip",
+  );
+
+  return (
+    <div className="relative w-full sm:w-72">
+      <div className="flex items-center gap-2 rounded-md border border-surface-border bg-surface-base px-3 py-2 focus-within:border-accent-gold">
+        <Search className="h-4 w-4 shrink-0 text-text-muted" aria-hidden="true" />
+        <input
+          type="search"
+          value={q}
+          onChange={(e) => {
+            setQ(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          // Delay close so a result's click (mousedown) lands first.
+          onBlur={() => window.setTimeout(() => setOpen(false), 150)}
+          placeholder="Find a grave by name…"
+          aria-label="Find a grave by the deceased's name"
+          data-testid="find-grave-input"
+          className="w-full bg-transparent text-sm text-text-default outline-none placeholder:text-text-muted"
+        />
+      </div>
+
+      {open && trimmed.length >= 2 && (
+        <div className="absolute z-[1100] mt-1 max-h-72 w-full overflow-y-auto rounded-md border border-surface-border bg-surface-base shadow-lg">
+          {results === undefined ? (
+            <div className="px-3 py-2 text-xs text-text-muted">Searching…</div>
+          ) : results.length === 0 ? (
+            <div className="px-3 py-2 text-xs text-text-muted">
+              No graves match “{trimmed}”.
+            </div>
+          ) : (
+            <ul>
+              {results.map((hit) => (
+                <li key={`${hit.lotId}:${hit.occupantName}`}>
+                  <button
+                    type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      onPick(hit);
+                      setQ(hit.occupantName);
+                      setOpen(false);
+                    }}
+                    className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-surface-emphasis"
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-medium text-text-default">
+                        {hit.occupantName}
+                      </span>
+                      <span className="block font-mono text-[11px] text-text-muted">
+                        Lot {hit.lotCode} · {hit.section}
+                      </span>
+                    </span>
+                    <StatusPill status={hit.status} size="sm" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   );
 }

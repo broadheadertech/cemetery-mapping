@@ -166,6 +166,7 @@ export function LotDetail({ detail, roles = [], onRetire }: LotDetailProps) {
         lotId={detail._id}
         canEdit={canEdit}
         retired={detail.isRetired}
+        status={detail.status}
         onRequestRetire={() => setRetireOpen(true)}
       />
 
@@ -222,18 +223,34 @@ function ActionRow({
   lotId,
   canEdit,
   retired,
+  status,
   onRequestRetire,
 }: {
   lotId: string;
   canEdit: boolean;
   retired: boolean;
+  status: LotStatus;
   onRequestRetire: () => void;
 }) {
+  // Deep-link the sale flow with this lot pre-selected. Only meaningful
+  // for an Available lot (the sale form's LotPicker lists Available lots
+  // only), and only for roles that can transact.
+  const canSell = canEdit && !retired && status === "available";
   return (
     <div
       className="flex flex-wrap items-center justify-end gap-3"
       data-testid="lot-detail-actions"
     >
+      {canSell && (
+        <Link
+          href={`/sales/new?lotId=${encodeURIComponent(lotId)}`}
+          className="inline-flex min-h-[44px] items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-fg hover:bg-primary-hover"
+          aria-label="Start a sale for this lot"
+          data-testid="lot-detail-start-sale"
+        >
+          Start sale
+        </Link>
+      )}
       <Link
         href={`/lots/${lotId}/conditions`}
         className="inline-flex min-h-[44px] items-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
@@ -243,6 +260,14 @@ function ActionRow({
       </Link>
       {canEdit && (
         <>
+          <Link
+            href={`/lots/${lotId}/location`}
+            className="inline-flex min-h-[44px] items-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            aria-label="Set this lot's location on the map"
+            data-testid="lot-detail-set-location"
+          >
+            Set location
+          </Link>
           <Link
             href={`/lots/${lotId}/edit`}
             className="inline-flex min-h-[44px] items-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
