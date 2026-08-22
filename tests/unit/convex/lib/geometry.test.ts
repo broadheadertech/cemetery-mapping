@@ -41,8 +41,8 @@ const V4: LatLng = { lat: 14.676, lng: 121.05 };
 describe("DEFAULT_PLACEHOLDER_CENTROID", () => {
   it("matches the cemetery placeholder coordinate", () => {
     expect(DEFAULT_PLACEHOLDER_CENTROID).toEqual({
-      lat: 14.676,
-      lng: 121.0437,
+      lat: 16.3955,
+      lng: 120.3585,
     });
   });
 });

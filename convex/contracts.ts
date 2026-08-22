@@ -1791,6 +1791,31 @@ export interface ContractDetailResult {
  *   - `UNAUTHENTICATED` / `FORBIDDEN` — auth gate (admin / office_staff).
  *   - `NOT_FOUND` — contract id does not resolve.
  */
+/**
+ * Map cockpit helper — the id of the lot's PAYABLE contract (state
+ * `active` or `in_default`), or null. Lets the lot action menu show
+ * "Record payment" only when there's actually a contract to pay against,
+ * and deep-link straight to `/payments/new?contractId=…`. A lot has at
+ * most one open contract, so the first payable row is the answer.
+ */
+export const getPayableContractIdForLot = queryGeneric({
+  args: { lotId: v.id("lots") },
+  handler: async (
+    ctx: QueryCtx,
+    args: { lotId: LotId },
+  ): Promise<ContractId | null> => {
+    await requireRole(ctx, ["admin", "office_staff"]);
+    const rows = await ctx.db
+      .query("contracts")
+      .withIndex("by_lot", (q) => q.eq("lotId", args.lotId))
+      .collect();
+    const payable = rows.find(
+      (c) => c.state === "active" || c.state === "in_default",
+    );
+    return payable ? payable._id : null;
+  },
+});
+
 export const getContract = queryGeneric({
   args: { contractId: v.id("contracts") },
   handler: async (
