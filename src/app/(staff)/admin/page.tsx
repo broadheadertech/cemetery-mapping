@@ -127,6 +127,12 @@ const GROUPS: AdminGroup[] = [
         description: "Approve or reject expenses that exceeded the threshold.",
       },
       {
+        href: "/admin/readiness",
+        title: "Go-live readiness",
+        description:
+          "What is still unconfigured on this deployment, checked live.",
+      },
+      {
         href: "/admin/settings/payment-gateways",
         title: "Payment gateways",
         description:

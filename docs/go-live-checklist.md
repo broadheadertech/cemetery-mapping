@@ -8,6 +8,8 @@ This is the list of everything standing between the current branch and a cemeter
 
 A line is only ticked when someone has verified it against the live deployment. "The code supports it" is not the same as "it is configured."
 
+**`/admin/readiness` answers the machine-checkable half of this list live.** It reads the actual deployment — which gateways have credentials, which environment variables are set, whether the BIR and perpetual-care configs are still placeholders — so you do not need a developer at a terminal to find out. It reports presence only, never a secret's value, and it marks what it cannot see (backups) as uncheckable rather than green. This document stays the authoritative version because it also carries owners, lead times, and the items no query can answer.
+
 ---
 
 ## Legend
@@ -83,8 +85,8 @@ The live deployment currently has **three** environment variables set: `JWKS`, `
 
 - [ ] **Confirm Convex scheduled backups are actually enabled** on the production deployment. This has never been verified; it is a dashboard check nobody has done.
 - [ ] **Run one restore drill** and record it in `docs/restore-drill-log.md`. Until this happens the documented procedure is specification, not practice, and NFR-R2's ≤4h RTO is a claim with no evidence. The log's own entry says as much.
-- [ ] Deploy the schema so the newer tables exist (`errorLog`, `enquiries`, `paymentGatewayConfig`)
-- [ ] Run `seed:seedDemo` **only** on a demo deployment — never against real cemetery data
+- [x] Deploy the schema so the newer tables exist (`errorLog`, `enquiries`, `paymentGatewayConfig`) — pushed to `beaming-boar-935` on 2026-08-23
+- [x] Demo seed has run on `beaming-boar-935` (8 lots, 3 customers, 2 contracts, 4 payments, 3 phases). Never run it against real cemetery data.
 - [ ] Decide a retention policy for `enquiries` (names and phone numbers of people who never became customers — a Data Privacy Act question) and add a sweep to `convex/crons.ts`
 
 ---
