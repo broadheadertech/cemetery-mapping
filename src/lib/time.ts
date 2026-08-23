@@ -24,12 +24,15 @@
  * Format options Story 2.1 needs:
  *   - "short"    → "May 19, 2026"     — the consent checkbox label.
  *
+ *   - "datetime" → "May 19, 2026, 8:30 AM" — the error log, where
+ *     the time of day is the whole point ("did this stop overnight,
+ *     or is it still happening?").
+ *
  * Future stories will extend this list (e.g. `"long"` →
- * `"Monday, May 19, 2026"`, `"datetime"` → `"May 19, 2026, 8:30 AM"`).
- * Add new variants here rather than inlining new `Intl.DateTimeFormat`
- * calls at each call site.
+ * `"Monday, May 19, 2026"`). Add new variants here rather than
+ * inlining new `Intl.DateTimeFormat` calls at each call site.
  */
-export type DateFormat = "short";
+export type DateFormat = "short" | "datetime";
 
 const FORMATTERS: Record<DateFormat, Intl.DateTimeFormat> = {
   short: new Intl.DateTimeFormat("en-PH", {
@@ -37,6 +40,14 @@ const FORMATTERS: Record<DateFormat, Intl.DateTimeFormat> = {
     year: "numeric",
     month: "short",
     day: "numeric",
+  }),
+  datetime: new Intl.DateTimeFormat("en-PH", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
   }),
 };
 

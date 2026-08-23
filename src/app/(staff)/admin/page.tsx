@@ -127,6 +127,12 @@ const GROUPS: AdminGroup[] = [
         description: "Approve or reject expenses that exceeded the threshold.",
       },
       {
+        href: "/admin/errors",
+        title: "Error log",
+        description:
+          "Failures recorded by scheduled jobs, webhooks, and document generation.",
+      },
+      {
         href: "/admin/lot-import",
         title: "Lot inventory import",
         description:

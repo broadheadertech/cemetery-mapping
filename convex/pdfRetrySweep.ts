@@ -54,6 +54,7 @@ import {
 
 import schema from "./schema";
 import { type MutationCtx } from "./lib/auth";
+import { captureError } from "./lib/errorCapture";
 
 type DataModel = DataModelFromSchemaDefinition<typeof schema>;
 type ContractId = DataModel["contracts"]["document"]["_id"];
@@ -114,6 +115,10 @@ export const internal_sweepContractPdfs = internalMutationGeneric({
     const candidates = [...failed, ...pending];
     let retried = 0;
     let skipped = 0;
+    // Rows past the retry cap: these will never generate on their own
+    // and need an operator to click Retry. Counted apart from scheduler
+    // failures so the error log can say which problem this is.
+    let exhausted = 0;
     const actionRef = makeFunctionReference<
       "action",
       { contractId: ContractId },
@@ -127,6 +132,7 @@ export const internal_sweepContractPdfs = internalMutationGeneric({
     for (const row of candidates) {
       if ((row.pdfRetryCount ?? 0) >= MAX_PDF_RETRIES) {
         skipped += 1;
+        exhausted += 1;
         continue;
       }
       try {
@@ -146,6 +152,17 @@ export const internal_sweepContractPdfs = internalMutationGeneric({
         );
         skipped += 1;
       }
+    }
+    if (exhausted > 0) {
+      // Silent until now: a document stuck past the cap simply stopped
+      // being retried, and the first anyone knew was a customer asking
+      // where their contract PDF was.
+      await captureError(ctx, {
+        source: "cron:sweepContractPdfs",
+        severity: "warning",
+        error: `${exhausted} contract PDF${exhausted === 1 ? "" : "s"} past the retry cap — they need a manual retry from the admin UI.`,
+        context: { exhausted, retried, skipped },
+      });
     }
     return { retried, skipped };
   },
@@ -176,6 +193,10 @@ export const internal_sweepDemandLetterPdfs = internalMutationGeneric({
     const candidates = [...failed, ...pending];
     let retried = 0;
     let skipped = 0;
+    // Rows past the retry cap: these will never generate on their own
+    // and need an operator to click Retry. Counted apart from scheduler
+    // failures so the error log can say which problem this is.
+    let exhausted = 0;
     const actionRef = makeFunctionReference<
       "action",
       { contractId: ContractId },
@@ -189,6 +210,7 @@ export const internal_sweepDemandLetterPdfs = internalMutationGeneric({
     for (const row of candidates) {
       if ((row.demandLetterRetryCount ?? 0) >= MAX_PDF_RETRIES) {
         skipped += 1;
+        exhausted += 1;
         continue;
       }
       try {
@@ -203,6 +225,17 @@ export const internal_sweepDemandLetterPdfs = internalMutationGeneric({
         );
         skipped += 1;
       }
+    }
+    if (exhausted > 0) {
+      // Silent until now: a document stuck past the cap simply stopped
+      // being retried, and the first anyone knew was a customer asking
+      // where their demand letter was.
+      await captureError(ctx, {
+        source: "cron:sweepDemandLetterPdfs",
+        severity: "warning",
+        error: `${exhausted} demand letter${exhausted === 1 ? "" : "s"} past the retry cap — they need a manual retry from the admin UI.`,
+        context: { exhausted, retried, skipped },
+      });
     }
     return { retried, skipped };
   },
@@ -234,6 +267,10 @@ export const internal_sweepPlaqueDraftPdfs = internalMutationGeneric({
     const candidates = [...failed, ...pending];
     let retried = 0;
     let skipped = 0;
+    // Rows past the retry cap: these will never generate on their own
+    // and need an operator to click Retry. Counted apart from scheduler
+    // failures so the error log can say which problem this is.
+    let exhausted = 0;
     // The plaque action's full arg shape requires the draft's render
     // payload (name + years + format + epitaph); the sweep reads each
     // row to forward those into the scheduler. The bump helper flips
@@ -259,6 +296,7 @@ export const internal_sweepPlaqueDraftPdfs = internalMutationGeneric({
     for (const row of candidates) {
       if (row.retryCount >= MAX_PDF_RETRIES) {
         skipped += 1;
+        exhausted += 1;
         continue;
       }
       try {
@@ -293,6 +331,17 @@ export const internal_sweepPlaqueDraftPdfs = internalMutationGeneric({
         skipped += 1;
       }
     }
+    if (exhausted > 0) {
+      // Silent until now: a document stuck past the cap simply stopped
+      // being retried, and the first anyone knew was a customer asking
+      // where their memorial plaque draft was.
+      await captureError(ctx, {
+        source: "cron:sweepPlaqueDraftPdfs",
+        severity: "warning",
+        error: `${exhausted} memorial plaque draft${exhausted === 1 ? "" : "s"} past the retry cap — they need a manual retry from the admin UI.`,
+        context: { exhausted, retried, skipped },
+      });
+    }
     return { retried, skipped };
   },
 });
@@ -318,6 +367,10 @@ export const internal_sweepReceiptPdfs = internalMutationGeneric({
     const candidates = [...failed, ...pending];
     let retried = 0;
     let skipped = 0;
+    // Rows past the retry cap: these will never generate on their own
+    // and need an operator to click Retry. Counted apart from scheduler
+    // failures so the error log can say which problem this is.
+    let exhausted = 0;
     const actionRef = makeFunctionReference<
       "action",
       { receiptId: ReceiptId; forceRegenerate?: boolean },
@@ -331,6 +384,7 @@ export const internal_sweepReceiptPdfs = internalMutationGeneric({
     for (const row of candidates) {
       if ((row.pdfRetryCount ?? 0) >= MAX_PDF_RETRIES) {
         skipped += 1;
+        exhausted += 1;
         continue;
       }
       try {
@@ -345,6 +399,17 @@ export const internal_sweepReceiptPdfs = internalMutationGeneric({
         );
         skipped += 1;
       }
+    }
+    if (exhausted > 0) {
+      // Silent until now: a document stuck past the cap simply stopped
+      // being retried, and the first anyone knew was a customer asking
+      // where their receipt PDF was.
+      await captureError(ctx, {
+        source: "cron:sweepReceiptPdfs",
+        severity: "warning",
+        error: `${exhausted} receipt PDF${exhausted === 1 ? "" : "s"} past the retry cap — they need a manual retry from the admin UI.`,
+        context: { exhausted, retried, skipped },
+      });
     }
     return { retried, skipped };
   },

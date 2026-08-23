@@ -137,6 +137,75 @@ export default defineSchema({
     .index("by_timestamp", ["timestamp"]),
 
   /**
+   * Server-side error log — production observability.
+   *
+   * Until this table existed, a failed cron, a rejected gateway
+   * webhook, or a bounced provider call left a trace in
+   * `npx convex logs` and nowhere else. Convex log retention is
+   * short and the cemetery has no on-call engineer watching a
+   * terminal, so anything that failed overnight was effectively
+   * invisible until a person noticed the downstream symptom —
+   * a receipt that never arrived, an AR bucket that never moved.
+   *
+   * GROUPED, not append-only. One row per `fingerprint` (a stable
+   * source + normalised-message key), carrying an occurrence count
+   * and the most recent detail. A cron failing every ten minutes for
+   * a weekend produces ONE row with `count: 288`, not 288 rows that
+   * bury everything else and push the table toward the size where it
+   * becomes its own problem. The trade-off is deliberate: individual
+   * occurrence payloads are lost, the latest is kept. When a specific
+   * occurrence matters (a financial event), the audit log — which IS
+   * append-only — is the record that answers it.
+   *
+   * This is NOT the audit log and must never be used as one. The
+   * audit log is a legal record of what people did; this is an
+   * operational record of what broke. Nothing here is authoritative
+   * about business state.
+   *
+   * PII: `context` is `v.any()` and passes through `redactPii` at
+   * write time, the same helper `emitAudit` uses (ADR-0007 keeps PII
+   * out of secondary stores). `message` and `stack` come from thrown
+   * errors and are NOT redacted — code must not put customer data in
+   * an error message, which is the existing convention in
+   * `convex/lib/errors.ts`.
+   *
+   * Field notes:
+   *   - `fingerprint` — grouping key. Derived, never operator-typed.
+   *   - `source` — where it happened, e.g. `cron:reflagExpired`,
+   *     `webhook:gcash`, `action:sendEmailReminder`.
+   *   - `severity` — `error` (something failed) or `warning`
+   *     (something was rejected as designed but an operator should
+   *     know, e.g. a webhook with a bad signature).
+   *   - `count` / `firstSeenAt` / `lastSeenAt` — occurrence window.
+   *   - `isResolved` — an admin acknowledging they have dealt with
+   *     it. A later occurrence reopens the row (sets it false again),
+   *     because "it happened again" is exactly what an operator needs
+   *     to see after they thought it was fixed.
+   *
+   * Indexes:
+   *   - `by_fingerprint` — the upsert lookup on every capture.
+   *   - `by_lastSeenAt` — the admin list, newest first.
+   *   - `by_resolved_lastSeen` — the default "unresolved only" view.
+   */
+  errorLog: defineTable({
+    fingerprint: v.string(),
+    source: v.string(),
+    severity: v.union(v.literal("error"), v.literal("warning")),
+    message: v.string(),
+    stack: v.optional(v.string()),
+    context: v.optional(v.any()),
+    count: v.number(),
+    firstSeenAt: v.number(),
+    lastSeenAt: v.number(),
+    isResolved: v.boolean(),
+    resolvedAt: v.optional(v.number()),
+    resolvedBy: v.optional(v.id("users")),
+  })
+    .index("by_fingerprint", ["fingerprint"])
+    .index("by_lastSeenAt", ["lastSeenAt"])
+    .index("by_resolved_lastSeen", ["isResolved", "lastSeenAt"]),
+
+  /**
    * Lot inventory table (Story 1.8, FR6 / FR8 / FR10).
    *
    * Central inventory entity that every downstream domain depends on

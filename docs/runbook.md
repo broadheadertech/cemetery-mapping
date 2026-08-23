@@ -1,7 +1,7 @@
 # Operations Runbook
 
 - **Status:** Starter (Story 2.8 created the PII-encryption section; Story 5.6 added the Database backups section; Stories 5.5+, 5.7+, 6.x will continue to expand this file).
-- **Last updated:** 2026-05-18
+- **Last updated:** 2026-08-23
 
 This document is the on-call / operator-of-record reference for the cemetery-mapping system. It is meant to be opened DURING an incident or compliance request, not read end-to-end on a regular cadence.
 
@@ -25,6 +25,46 @@ The Phase 1 deployment has **no seed script**. The first admin is bootstrapped a
    The internal mutation re-runs the same "only when `userRoles` is empty" guard, then grants `admin` to the passed `userId`.
 
 After the bootstrap, **disable self-signup in the UI** (Story 1.3 will remove the affordance entirely; until then, do not advertise the link to non-admin staff).
+
+## Error log (`/admin/errors`)
+
+**This is the first place to look when someone asks "did anything break?"**
+
+Before the `errorLog` table existed, a failed cron, a rejected payment webhook, or a document that exhausted its retries left a line in `npx convex logs` and nothing else. Convex log retention is short, nobody here is on call, and the first symptom of a silent failure was a customer asking where their receipt was.
+
+### What lands there
+
+| Source prefix | What it means |
+| --- | --- |
+| `webhook:gcash` / `webhook:maya` / `webhook:card` | A payment webhook was rejected or failed to post. |
+| `webhook:email-bounce` | A bounce/complaint event was rejected or could not be applied. |
+| `cron:sweepContractPdfs` and siblings | Documents past the retry cap — they will not generate without a manual retry. |
+
+### How to read it
+
+Rows are **groups**, not occurrences: one row per distinct failure, with an occurrence count and a first/last-seen window. A cron failing every ten minutes all weekend is one row at `count: 288`. Grouping is by `source` + a normalised message (ids, numbers, and quoted values are collapsed), so the same failure across different lots stays one row.
+
+"Mark resolved" is an **acknowledgement, not a fix**. If the same failure recurs, the row reopens itself and the count keeps climbing — deliberate, because "I looked at this" and "it came back" are different facts.
+
+### The two entries that mean money is being lost right now
+
+Both are `severity: error` and both are silent everywhere else:
+
+1. **`<GATEWAY>_WEBHOOK_SECRET is not set`** — every webhook from that gateway is being 401'd. Customers are paying and the payments are not landing. Fix: `npx convex env set GCASH_WEBHOOK_SECRET <value>` (and the same for `MAYA_` / `CARD_`), then ask the gateway to replay the missed events.
+
+2. **`EMAIL_WEBHOOK_SECRET is not set`** — bounce events are all being rejected, so hard-bounced addresses keep receiving reminders and the sender reputation degrades. Fix: `npx convex env set EMAIL_WEBHOOK_SECRET <value>`.
+
+A run of `signature did not verify` warnings from one gateway usually means the shared secret was rotated on their side and not here.
+
+### What it is NOT
+
+Not an audit log. The audit log (`auditLog`) is an append-only legal record of what people did and is authoritative about business state. The error log is an operational record of what broke, is lossy by design (latest occurrence detail only), and is authoritative about nothing.
+
+### Retention
+
+There is no automatic pruning yet. The grouping keeps growth proportional to the number of *distinct* failures rather than occurrences, which is what makes that acceptable for now. If the table ever grows past a few hundred groups, that is itself the signal — something is generating novel failures continuously.
+
+---
 
 ## PII encryption posture
 
