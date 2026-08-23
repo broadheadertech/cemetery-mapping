@@ -3450,6 +3450,78 @@ export default defineSchema({
    *   - `by_createdAt` — the full listing and the rate-limit window scan.
    *   - `by_contactKey_createdAt` — per-contact rate limiting.
    */
+  /**
+   * Payment-gateway credentials, settable by an admin in the UI.
+   *
+   * Why this table exists: the adapters in
+   * `convex/lib/paymentGateways/` already have live fetch paths, but
+   * they read `<GATEWAY>_API_BASE_URL` / `<GATEWAY>_API_KEY` from the
+   * process environment. Setting those means `npx convex env set` from
+   * a developer's terminal. The cemetery has no developer on staff, so
+   * go-live and every later key rotation would have required calling
+   * one. This table moves that to `/admin/settings/payment-gateways`.
+   *
+   * ## Secrets in the database — the trade-off, stated plainly
+   *
+   * An API key here is less protected than one in the Convex
+   * environment. It sits in the table, in every backup, and any query
+   * that reads the row can read it. That is a real reduction in
+   * defence, accepted for a specific reason: a cemetery that cannot
+   * rotate its own webhook secret will not rotate it at all, and a
+   * stale secret nobody can change is the worse exposure.
+   *
+   * The reduction is bounded by how the surface is built — the
+   * constraints below are load-bearing, not decoration:
+   *
+   *   1. **No secret ever leaves the server.** The admin read query
+   *      returns a masked preview (last 4 characters) and never the
+   *      value. Only internal, server-side resolvers read the real
+   *      thing, and their results go to `fetch` and HMAC verification,
+   *      never to a client.
+   *   2. **Admin only**, on both read and write.
+   *   3. **Every change is audited**, with the secret redacted — the
+   *      audit records that a key was rotated and by whom, never what
+   *      it was rotated to.
+   *   4. **Excluded from the archival export.** The BIR archive is a
+   *      financial record; shipping live credentials into a ten-year
+   *      S3 retention bucket would be indefensible.
+   *
+   * Environment variables still win when set. An operator who wants
+   * credentials kept out of the database entirely can set the env vars
+   * and this table is ignored — see `resolveGatewayCredentials`. That
+   * keeps the stricter posture available to anyone who wants it.
+   *
+   * Field notes:
+   *   - `gateway` — one row per gateway; the id is the natural key.
+   *   - `apiBaseUrl` — the gateway's API root. Its presence is what
+   *     switches the adapter off the mock page, so a blank value here
+   *     with no env fallback means "not configured".
+   *   - `apiKey` / `webhookSecret` — the secrets. Never returned to a
+   *     client.
+   *   - `isEnabled` — an off switch that does not require clearing the
+   *     credentials. Turning a gateway off mid-incident should not
+   *     mean retyping its key afterwards.
+   *   - `mode` — `sandbox` or `live`, recorded so the admin page can
+   *     state which one is in force. The adapter does not branch on
+   *     it; the base URL decides where requests go.
+   *
+   * Index: `by_gateway` — the resolver's single lookup.
+   */
+  paymentGatewayConfig: defineTable({
+    gateway: v.union(
+      v.literal("gcash"),
+      v.literal("maya"),
+      v.literal("card"),
+    ),
+    apiBaseUrl: v.string(),
+    apiKey: v.string(),
+    webhookSecret: v.string(),
+    isEnabled: v.boolean(),
+    mode: v.union(v.literal("sandbox"), v.literal("live")),
+    updatedAt: v.number(),
+    updatedBy: v.id("users"),
+  }).index("by_gateway", ["gateway"]),
+
   enquiries: defineTable({
     kind: v.union(v.literal("visit"), v.literal("pricing")),
     name: v.string(),

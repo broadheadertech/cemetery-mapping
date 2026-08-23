@@ -127,6 +127,12 @@ const GROUPS: AdminGroup[] = [
         description: "Approve or reject expenses that exceeded the threshold.",
       },
       {
+        href: "/admin/settings/payment-gateways",
+        title: "Payment gateways",
+        description:
+          "GCash, Maya, and card credentials. Required before the portal can take payments.",
+      },
+      {
         href: "/admin/errors",
         title: "Error log",
         description:

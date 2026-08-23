@@ -74,6 +74,25 @@ const patchPaymentIntentRedirectRef = makeFunctionReference<
   void
 >("portal:patchPaymentIntentRedirect");
 
+/**
+ * Credentials resolver. Runs before the adapter call so the adapter
+ * never reaches into ambient process state — the values may come from
+ * the environment OR from the `paymentGatewayConfig` table an admin
+ * edits, and only a ctx-holding caller can read the latter.
+ */
+const getCredentialsRef = makeFunctionReference<
+  "query",
+  { gateway: "gcash" | "maya" | "card" },
+  {
+    apiBaseUrl: string;
+    apiKey: string;
+    webhookSecret: string;
+    isEnabled: boolean;
+    mode: "sandbox" | "live";
+    source: "env" | "database" | "unset";
+  }
+>("paymentGatewayConfig:internal_getCredentials");
+
 const markPaymentIntentFailedRef = makeFunctionReference<
   "mutation",
   { paymentIntentId: string; failureReason: string },
@@ -166,6 +185,18 @@ export const gatewayCreateIntent = actionGeneric({
     // eslint-disable-next-line local-rules/require-role-first-line -- Scheduled-only: `portal.createGatewayPaymentIntent` role-gates the caller before scheduling this action; actions cannot read user auth from ctx.db.
     try {
       const adapter = getAdapter(args.gateway);
+      const credentials = await ctx.runQuery(getCredentialsRef, {
+        gateway: args.gateway,
+      });
+      // An admin can switch a gateway off without clearing its
+      // credentials. Refuse before calling out — charging a customer
+      // through a route the cemetery has disabled is worse than an
+      // error on the way in.
+      if (credentials.source !== "unset" && !credentials.isEnabled) {
+        throw new Error(
+          `configuration_error: ${args.gateway} is switched off at /admin/settings/payment-gateways`,
+        );
+      }
       const result = await adapter.createIntent({
         paymentIntentId: args.paymentIntentId,
         amountCents: args.amountCents,
@@ -174,6 +205,10 @@ export const gatewayCreateIntent = actionGeneric({
         metadata: {
           contractId: args.contractId,
           customerId: args.customerId,
+        },
+        credentials: {
+          apiBaseUrl: credentials.apiBaseUrl,
+          apiKey: credentials.apiKey,
         },
       });
       await ctx.runMutation(patchPaymentIntentRedirectRef, {

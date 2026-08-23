@@ -26,6 +26,50 @@ The Phase 1 deployment has **no seed script**. The first admin is bootstrapped a
 
 After the bootstrap, **disable self-signup in the UI** (Story 1.3 will remove the affordance entirely; until then, do not advertise the link to non-admin staff).
 
+## Payment gateways (`/admin/settings/payment-gateways`)
+
+GCash, Maya, and a card processor. The adapters in `convex/lib/paymentGateways/` have live fetch paths; what decides whether a payment reaches the provider is whether credentials resolve.
+
+### Two sources, env wins
+
+1. **Environment variables** — `<GATEWAY>_API_BASE_URL`, `<GATEWAY>_API_KEY`, `<GATEWAY>_WEBHOOK_SECRET`. When the base URL is set here, this source wins outright and the database row is ignored. The admin page shows the gateway as **From environment** and hides the form.
+2. **The admin page**, stored in `paymentGatewayConfig`.
+
+Env-first is deliberate. Keeping secrets in the Convex environment is the stronger posture, and an operator who chooses it must not have it silently overridden by a later UI edit.
+
+### Why the database option exists at all
+
+Setting env vars means `npx convex env set` from a developer's terminal. The cemetery has no developer on staff, so go-live and every later key rotation would require calling one — and a webhook secret nobody on site can rotate is a secret that never gets rotated. That is the trade-off being made: a weaker storage location in exchange for credentials the cemetery can actually manage.
+
+What bounds it (all four are load-bearing — see the schema comment on `paymentGatewayConfig`):
+
+- Secrets never leave the server. The admin query returns a masked tail (`••••1234`); only internal resolvers read the real value.
+- Admin only, read and write.
+- Every change is audited with the values redacted — the trail shows a key was rotated and by whom, never to what.
+- Excluded from the BIR archival export. Live credentials must not land in a ten-year S3 bucket.
+
+### Going live with a gateway
+
+1. Get merchant credentials from the provider (sandbox first).
+2. Open `/admin/settings/payment-gateways`, set the base URL (https only), the API key, and the webhook signing secret.
+3. Register the webhook endpoint with the provider: `https://beaming-boar-935.convex.site/api/<gateway>-webhook`. See § Convex deployment URLs.
+4. Leave **Mode** on Sandbox and tick "Accept payments". Run one end-to-end payment.
+5. Switch the base URL and key to production values, set Mode to Live.
+
+### Turning one off
+
+Untick "Accept payments". The credentials stay, so switching back on later does not mean retyping a key — which matters when you are turning a gateway off during an incident.
+
+### Failure signals
+
+A misconfiguration shows up in [`/admin/errors`](#error-log-adminerrors) under `webhook:<gateway>`, not in silence:
+
+- *No webhook secret configured* — every callback is being 401'd, so customers are paying and the payments are not landing. The most expensive failure in the system.
+- *Signature did not verify* — usually the provider rotated the secret; copy the new one in.
+- *Gateway is switched off* — someone unticked the box and the portal is refusing intents.
+
+---
+
 ## Website enquiries (`/enquiries`)
 
 The public marketing site has two forms — schedule-a-visit on `/contact` and the pricing enquiry on `/pricing`. Both write an `enquiries` row and schedule a staff notification email.
@@ -628,6 +672,7 @@ Forbidden phrasing (audit any new copy against this list):
 
 ## References
 
+- [Go-live checklist](./go-live-checklist.md) — what is still outstanding before the cemetery can take real money, and who can clear each item.
 - [ADR-0007 — PII encryption at rest](./adr/0007-pii-encryption.md)
 - [ADR-0017 — Database backups](./adr/0017-database-backups.md)
 - [ADR-0018 — Archival exports](./adr/0018-archival-export.md)

@@ -106,12 +106,13 @@ export const gcashAdapter: IGatewayAdapter = {
     // page. The mock page presents Confirm / Decline buttons that fire
     // a test-side webhook via the runbook's "manual replay" path.
     //
-    // Production swap: replace this block with a `fetch` against the
-    // GCash merchant API using `process.env.GCASH_API_KEY` +
-    // `process.env.GCASH_API_BASE_URL`. The returned `redirectUrl`
-    // becomes GCash's hosted checkout URL; `gatewayIntentId` becomes
-    // GCash's intent reference.
-    const base = process.env.GCASH_API_BASE_URL ?? "";
+    // Live path below. Credentials arrive in `args.credentials`,
+    // resolved by the caller from the environment or from the
+    // `paymentGatewayConfig` table — see
+    // `convex/lib/gatewayCredentials.ts`. The returned `redirectUrl`
+    // is GCash's hosted checkout URL; `gatewayIntentId` is their
+    // intent reference.
+    const base = args.credentials.apiBaseUrl.trim();
     if (base.length === 0) {
       // Production refuses to fall through to the mock URL — the
       // mock-gateway page is dev / sandbox only (P0-1 adversarial
@@ -121,7 +122,7 @@ export const gcashAdapter: IGatewayAdapter = {
       // customer-facing string).
       if (process.env.NODE_ENV === "production") {
         throw new Error(
-          "configuration_error: GCASH_API_BASE_URL is not set in production",
+          "configuration_error: gcash has no API base URL — set it at /admin/settings/payment-gateways or via GCASH_API_BASE_URL",
         );
       }
       // Sandbox / mock path.
@@ -145,7 +146,7 @@ export const gcashAdapter: IGatewayAdapter = {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: `Bearer ${process.env.GCASH_API_KEY ?? ""}`,
+        authorization: `Bearer ${args.credentials.apiKey}`,
       },
       body: JSON.stringify({
         amount_cents: args.amountCents,

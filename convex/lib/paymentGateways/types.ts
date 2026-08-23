@@ -107,6 +107,26 @@ export interface GatewayCreateIntentArgs {
     contractId: string;
     customerId: string;
   };
+  /**
+   * Resolved credentials for this gateway, supplied by the caller.
+   *
+   * Adapters used to read `process.env.<GATEWAY>_API_*` directly. They
+   * no longer do, for two reasons: credentials can now come from the
+   * `paymentGatewayConfig` table as well as the environment (see
+   * `convex/lib/gatewayCredentials.ts`), and an adapter that reaches
+   * into ambient process state is one a test cannot exercise without
+   * mutating the environment. Resolution belongs to the caller —
+   * `convex/actions/gatewayCreateIntent.ts` — which has a ctx to read
+   * the table with.
+   *
+   * `apiBaseUrl` empty means "not configured": the adapter falls back
+   * to the in-app mock checkout outside production and refuses inside
+   * it.
+   */
+  credentials: {
+    apiBaseUrl: string;
+    apiKey: string;
+  };
 }
 
 /**

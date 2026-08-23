@@ -297,6 +297,7 @@ describe.each(ADAPTERS)("$id adapter — createIntent (sandbox)", (adapter) => {
       currency: "PHP",
       returnUrl: "/portal/pay/return?intent=intent-xyz",
       metadata: { contractId: "contract-1", customerId: "customer-1" },
+      credentials: { apiBaseUrl: "", apiKey: "" },
     });
     expect(result.redirectUrl).toMatch(/^\/portal\/pay\/mock-gateway\?/);
     expect(result.redirectUrl).toContain(`intent=intent-xyz`);
@@ -304,6 +305,71 @@ describe.each(ADAPTERS)("$id adapter — createIntent (sandbox)", (adapter) => {
     expect(result.redirectUrl).toContain("amount=100000");
     expect(result.gatewayIntentId).toContain(adapter.id);
     expect(result.gatewayIntentId).toContain("intent-xyz");
+  });
+
+  it("calls the gateway API when credentials supply a base URL", async () => {
+    // The live path existed all along but was reachable only by setting
+    // a process env var, so nothing exercised it. Credentials now
+    // arrive as an argument, which makes it testable without mutating
+    // the environment.
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ redirectUrl: "https://gw.example/pay/abc", id: "gw_abc" }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+    try {
+      const result = await adapter.createIntent({
+        paymentIntentId: "intent-live",
+        amountCents: 250_000,
+        currency: "PHP",
+        returnUrl: "/portal/pay/return?intent=intent-live",
+        metadata: { contractId: "contract-1", customerId: "customer-1" },
+        credentials: {
+          apiBaseUrl: "https://gw.example/v1",
+          apiKey: "sk_test_123",
+        },
+      });
+      expect(result.redirectUrl).toBe("https://gw.example/pay/abc");
+      expect(result.gatewayIntentId).toBe("gw_abc");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toContain("https://gw.example/v1");
+      // The supplied key must reach the wire — an adapter that quietly
+      // sent an empty Authorization header would fail only in
+      // production, against the real gateway.
+      const headers = init.headers as Record<string, string>;
+      expect(headers.authorization).toContain("sk_test_123");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("does not fall back to the mock page once a base URL is configured", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("nope", { status: 500 }),
+    );
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+    try {
+      await expect(
+        adapter.createIntent({
+          paymentIntentId: "intent-fail",
+          amountCents: 100_000,
+          currency: "PHP",
+          returnUrl: "/portal/pay/return?intent=intent-fail",
+          metadata: { contractId: "contract-1", customerId: "customer-1" },
+          credentials: {
+            apiBaseUrl: "https://gw.example/v1",
+            apiKey: "sk_test_123",
+          },
+        }),
+      ).rejects.toThrow();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it("throws configuration_error when API base URL is unset AND NODE_ENV=production (P0-1)", async () => {
@@ -316,6 +382,7 @@ describe.each(ADAPTERS)("$id adapter — createIntent (sandbox)", (adapter) => {
           currency: "PHP",
           returnUrl: "/portal/pay/return?intent=intent-prod",
           metadata: { contractId: "contract-1", customerId: "customer-1" },
+          credentials: { apiBaseUrl: "", apiKey: "" },
         }),
       ).rejects.toThrow(/configuration_error/i);
     } finally {

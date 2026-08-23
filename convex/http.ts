@@ -69,6 +69,26 @@ const handleGatewayWebhookRef = makeFunctionReference<
  * receipt is. Recording the rejection turns a silent outage into a
  * row on /admin/errors.
  */
+/**
+ * Webhook secrets now resolve from the environment OR from the
+ * `paymentGatewayConfig` table an admin edits — see
+ * `convex/lib/gatewayCredentials.ts`. Reading the env var directly
+ * here would silently ignore anything configured through the UI, so
+ * this route asks the resolver.
+ */
+const getGatewayCredentialsRef = makeFunctionReference<
+  "query",
+  { gateway: GatewayId },
+  {
+    apiBaseUrl: string;
+    apiKey: string;
+    webhookSecret: string;
+    isEnabled: boolean;
+    mode: "sandbox" | "live";
+    source: "env" | "database" | "unset";
+  }
+>("paymentGatewayConfig:internal_getCredentials");
+
 const captureErrorRef = makeFunctionReference<
   "mutation",
   {
@@ -115,7 +135,18 @@ for (const gateway of GATEWAY_IDS) {
     handler: httpActionGeneric(async (ctx, req: Request): Promise<Response> => {
       const rawBody = await req.text();
       const sig = req.headers.get(adapter.signatureHeader) ?? "";
-      const secret = process.env[`${gateway.toUpperCase()}_WEBHOOK_SECRET`] ?? "";
+      let secret = "";
+      try {
+        const credentials = await ctx.runQuery(getGatewayCredentialsRef, {
+          gateway,
+        });
+        secret = credentials.webhookSecret;
+      } catch {
+        // Fall through with an empty secret — the branch below reports
+        // it as a configuration error, which is the right outcome
+        // whether the resolver failed or the secret was never set.
+        secret = "";
+      }
       if (secret.length === 0 || sig.length === 0) {
         // Distinguish the two: a missing SECRET is our misconfiguration
         // and every payment for this gateway is failing; a missing
@@ -124,7 +155,7 @@ for (const gateway of GATEWAY_IDS) {
           ctx,
           `webhook:${gateway}`,
           secret.length === 0
-            ? `${gateway.toUpperCase()}_WEBHOOK_SECRET is not set — every ${gateway} webhook is being rejected and payments are not landing.`
+            ? `No webhook secret configured for ${gateway} — every ${gateway} webhook is being rejected and payments are not landing. Set it at /admin/settings/payment-gateways or via ${gateway.toUpperCase()}_WEBHOOK_SECRET.`
             : `Rejected a ${gateway} webhook with no ${adapter.signatureHeader} header.`,
           secret.length === 0 ? "error" : "warning",
         );
