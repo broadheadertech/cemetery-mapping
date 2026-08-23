@@ -126,6 +126,11 @@ export default defineSchema({
       v.literal("family_estate"),
       v.literal("ceremony"),
       v.literal("plaque_draft"),
+      // Public marketing enquiries. Staff status changes are audited
+      // ("we called them back" is a claim someone may check later);
+      // the enquiry arriving is not an operator action and emits
+      // nothing.
+      v.literal("enquiry"),
     ),
     entityId: v.string(),
     before: v.optional(v.any()),
@@ -3386,6 +3391,96 @@ export default defineSchema({
    *   - `by_attemptedAt` — daily cleanup sweep filters by age via this
    *     index instead of scanning the whole table.
    */
+  /**
+   * Public enquiries from the marketing site — schedule-a-visit
+   * requests and pricing questions.
+   *
+   * Before this table, both forms called `setSent(true)` and threw the
+   * visitor's details away. The schedule-a-visit success state told a
+   * bereaved family "a care director will call within the working day"
+   * and nobody was ever told to call. This table is the missing half.
+   *
+   * One table, two `kind`s. The forms ask overlapping questions
+   * (name, how to reach you, timing, free-text notes) and the staff
+   * workflow is identical — someone reads it and rings back — so
+   * splitting them into two tables would duplicate the queue, the
+   * admin page, and the notification for no gain. Fields that apply
+   * to only one form are optional and documented below.
+   *
+   * WRITTEN BY AN UNAUTHENTICATED PUBLIC MUTATION. The visitor has no
+   * account; requiring one would defeat the form. Consequences that
+   * shape the design:
+   *
+   *   - `convex/enquiries.ts` rate-limits per normalised contact and
+   *     globally per window. Growth is bounded by policy, not trust.
+   *   - Every field is length-capped at write. A public writer must
+   *     never be able to choose how much storage it consumes.
+   *   - No field here is authoritative for anything. An enquiry is a
+   *     stranger's claim about themselves; it becomes a `customers`
+   *     row only when staff create one deliberately.
+   *
+   * PII: `name` and `contact` are personal data under the Data Privacy
+   * Act, submitted voluntarily by the person themselves. Retention is
+   * an open question for the cemetery — see the runbook. Staff status
+   * changes emit an audit row; the PII itself is redacted there by
+   * `emitAudit`, so the audit trail records that someone actioned
+   * enquiry X without re-copying the phone number into a second table.
+   *
+   * Field notes:
+   *   - `kind` — which form it came from.
+   *   - `contact` — free text. The visit form collects a phone; the
+   *     pricing form's field is labelled "phone or email". Stored as
+   *     typed rather than parsed, because a half-parsed phone number
+   *     is worse than the string the person actually wrote.
+   *   - `preferredDate` / `preferredTime` — visit form only. Date is
+   *     an ISO `YYYY-MM-DD` string from `<input type="date">`, kept as
+   *     a string because it is the visitor's stated preference in
+   *     their own local reckoning, not an instant.
+   *   - `purpose` — visit form: why they are coming.
+   *   - `lotTypeInterest` / `timing` — pricing form.
+   *   - `notes` — free text from either form.
+   *   - `status` — `new` → `contacted` → `closed`. Plain field, not a
+   *     state machine: there is no financial or legal consequence to
+   *     the transitions and ADR-0006's machinery would be ceremony.
+   *   - `handledBy` / `handledAt` — who actioned it, so an unanswered
+   *     enquiry has an owner.
+   *
+   * Indexes:
+   *   - `by_status_createdAt` — the staff queue, new first.
+   *   - `by_createdAt` — the full listing and the rate-limit window scan.
+   *   - `by_contactKey_createdAt` — per-contact rate limiting.
+   */
+  enquiries: defineTable({
+    kind: v.union(v.literal("visit"), v.literal("pricing")),
+    name: v.string(),
+    contact: v.string(),
+    /**
+     * Normalised `contact` (lowercased, non-alphanumerics stripped)
+     * used solely as the rate-limit key. Stored rather than computed
+     * on read so the index can do the work.
+     */
+    contactKey: v.string(),
+    preferredDate: v.optional(v.string()),
+    preferredTime: v.optional(v.string()),
+    purpose: v.optional(v.string()),
+    lotTypeInterest: v.optional(v.string()),
+    timing: v.optional(v.string()),
+    notes: v.optional(v.string()),
+    status: v.union(
+      v.literal("new"),
+      v.literal("contacted"),
+      v.literal("closed"),
+    ),
+    createdAt: v.number(),
+    handledBy: v.optional(v.id("users")),
+    handledAt: v.optional(v.number()),
+    /** Set when the staff notification email could not be sent. */
+    notifyFailedAt: v.optional(v.number()),
+  })
+    .index("by_status_createdAt", ["status", "createdAt"])
+    .index("by_createdAt", ["createdAt"])
+    .index("by_contactKey_createdAt", ["contactKey", "createdAt"]),
+
   authAttempts: defineTable({
     identifier: v.string(),
     attemptedAt: v.number(),

@@ -28,6 +28,12 @@ export const ErrorCode = {
   CANNOT_RETIRE_WITH_HISTORY: "CANNOT_RETIRE_WITH_HISTORY",
   DUPLICATE_CODE: "DUPLICATE_CODE",
   VALIDATION: "VALIDATION",
+  // Promoted from `convex/authRateLimit.ts`, which threw the literal
+  // "RATE_LIMITED" and noted that declaring it here was "a future
+  // follow-up". `convex/enquiries.ts` is the second consumer — the
+  // public enquiry form throttles the same way — so the code now lives
+  // in the enum rather than being spelled out at two call sites.
+  RATE_LIMITED: "RATE_LIMITED",
   // Story 2.1 — customer-domain codes.
   // CUSTOMER_CONSENT_INVARIANT fires when a `customers.create` /
   // `customers.update` mutation receives `hasConsent: false` but

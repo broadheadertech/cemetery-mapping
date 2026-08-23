@@ -80,7 +80,7 @@ export function NewsPageClient() {
                   href="/find-a-grave"
                   className="inline-flex items-center gap-2 rounded border border-primary px-5 py-3 text-sm font-medium text-primary transition-colors hover:bg-primary hover:text-primary-fg focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-2 focus-visible:ring-offset-surface-muted"
                 >
-                  Search the registry
+                  Find a grave
                   <ArrowRight size={16} aria-hidden />
                 </Link>
               </div>

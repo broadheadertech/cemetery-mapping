@@ -26,6 +26,44 @@ The Phase 1 deployment has **no seed script**. The first admin is bootstrapped a
 
 After the bootstrap, **disable self-signup in the UI** (Story 1.3 will remove the affordance entirely; until then, do not advertise the link to non-admin staff).
 
+## Website enquiries (`/enquiries`)
+
+The public marketing site has two forms — schedule-a-visit on `/contact` and the pricing enquiry on `/pricing`. Both write an `enquiries` row and schedule a staff notification email.
+
+**Someone must watch this queue.** Every row is a person who was told we would contact them. The sidebar badges the New count for admin and office staff.
+
+### Required configuration
+
+| Variable | Consequence if unset |
+| --- | --- |
+| `ENQUIRY_NOTIFY_TO` | Enquiries save and appear in the queue, but no email goes to the office. The error log records it on every submission. |
+| `RESEND_API_KEY`, `EMAIL_FROM` | Same — queued, not emailed. |
+
+Neither has a default. Guessing an office inbox would mean guessing wrong silently, which is the failure mode this whole feature exists to remove.
+
+### "Not emailed to the office" badge
+
+A row carrying this badge arrived but its notification failed, so the only person who knows about it is whoever is reading the queue. The cause is in [`/admin/errors`](#error-log-adminerrors) under `action:sendEnquiryNotification`. The enquiry itself is intact — the queue is the system of record, the email is a convenience.
+
+### Rate limits
+
+`submitEnquiry` is public and unauthenticated. Two windows bound it, both in `convex/enquiries.ts`:
+
+- **Per contact** — 3 per hour, keyed on the contact string with punctuation and case stripped.
+- **Global** — 60 per hour, which bounds table growth under abuse.
+
+Convex mutations cannot see the client IP (only an `httpAction` can), so there is no per-IP throttle. The global cap is the load-bearing protection. If the queue is ever flooded, raising the caps is not the fix — moving the endpoint to an HTTP route with per-IP limiting is.
+
+### Retention — open question
+
+Nothing prunes this table. These rows hold names and contact details of people who may never become customers, which is a Data Privacy Act consideration the cemetery should rule on: how long do we keep an enquiry nobody converted? Once they answer, add a cron alongside the other sweeps in `convex/crons.ts`.
+
+### What is NOT built
+
+Public grave search. `FindGraveSearch` used to be a name/year search box that silently did nothing — the target page never read the query. It is now a "call the office and we will look it up" panel. Turning it back into a real search is blocked on the cemetery deciding whether occupant names should be publicly searchable with no login; the steps are listed in that component's header.
+
+---
+
 ## Error log (`/admin/errors`)
 
 **This is the first place to look when someone asks "did anything break?"**
