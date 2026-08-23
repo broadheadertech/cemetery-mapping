@@ -27,7 +27,9 @@
  * route protection that the unit tests cannot.
  */
 
-import { test, expect, devices } from "@playwright/test";
+import { test, expect } from "@playwright/test";
+
+import { SMALL_MOBILE_PROFILE } from "./helpers/mobile-profile";
 
 test.describe("/dashboard — unauthenticated", () => {
   test("redirects unauthenticated users to /login", async ({ page }) => {
@@ -47,7 +49,7 @@ test.describe("/dashboard — unauthenticated", () => {
 });
 
 test.describe("/dashboard — mobile profile", () => {
-  test.use({ ...devices["iPhone 13 Mini"] });
+  test.use(SMALL_MOBILE_PROFILE);
   test("mobile viewport reaches the login redirect cleanly", async ({
     page,
   }) => {

@@ -98,6 +98,7 @@ import type * as phasePlanning from "../phasePlanning.js";
 import type * as plaqueDrafts from "../plaqueDrafts.js";
 import type * as portal from "../portal.js";
 import type * as portalInvites from "../portalInvites.js";
+import type * as readiness from "../readiness.js";
 import type * as receipts from "../receipts.js";
 import type * as reconciliation from "../reconciliation.js";
 import type * as reminders from "../reminders.js";
@@ -205,6 +206,7 @@ declare const fullApi: ApiFromModules<{
   plaqueDrafts: typeof plaqueDrafts;
   portal: typeof portal;
   portalInvites: typeof portalInvites;
+  readiness: typeof readiness;
   receipts: typeof receipts;
   reconciliation: typeof reconciliation;
   reminders: typeof reminders;

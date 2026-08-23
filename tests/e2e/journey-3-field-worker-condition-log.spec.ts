@@ -12,7 +12,9 @@
  * the established pattern from `lot-crud.spec.ts`.
  */
 
-import { test, expect, devices } from "@playwright/test";
+import { test, expect } from "@playwright/test";
+
+import { MOBILE_PROFILE } from "./helpers/mobile-profile";
 
 test.describe("lot conditions page — unauthenticated", () => {
   test("/lots/:id/conditions redirects unauthenticated users to /login", async ({
@@ -24,7 +26,7 @@ test.describe("lot conditions page — unauthenticated", () => {
 });
 
 test.describe("lot conditions page — mobile profile", () => {
-  test.use({ ...devices["Pixel 5"] });
+  test.use(MOBILE_PROFILE);
   test("mobile viewport renders the login redirect cleanly", async ({
     page,
   }) => {
