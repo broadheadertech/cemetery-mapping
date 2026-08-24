@@ -6,6 +6,8 @@ import { LOT_TYPES, type LotType } from "./data";
 import { LotTypeGrid } from "./LotTypeGrid";
 import { SectionHead } from "./SectionHead";
 import { BrandMark } from "./BrandMark";
+import { CallUsFallback, EnquiryErrorPanel } from "./CallUsFallback";
+import { useEnquirySubmit } from "./useEnquirySubmit";
 
 /**
  * Pricing page interactive shell — selectable lot grid + detail block
@@ -96,16 +98,28 @@ export function PricingPageClient() {
   );
 }
 
+/**
+ * Pricing enquiry form.
+ *
+ * Same history as `ScheduleVisitForm`: this discarded the visitor's
+ * details and displayed "we will reply by tomorrow afternoon". It now
+ * writes an `enquiries` row and notifies staff, and the thank-you
+ * renders only once the mutation resolves.
+ */
 function PricingInquiryForm({
   defaultLotId,
 }: {
   defaultLotId: LotType["id"];
 }) {
-  const [sent, setSent] = useState(false);
+  const { state, onSubmit, reset } = useEnquirySubmit("pricing");
+  const sending = state.kind === "sending";
 
-  function onSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setSent(true);
+  if (state.kind === "error") {
+    return (
+      <div className="mt-10 lg:mt-0">
+        <EnquiryErrorPanel message={state.message} onRetry={reset} />
+      </div>
+    );
   }
 
   return (
@@ -113,16 +127,18 @@ function PricingInquiryForm({
       onSubmit={onSubmit}
       className="mt-10 border-t-[3px] border-accent-gold bg-surface-base p-6 shadow-sm sm:p-8 lg:mt-0"
     >
-      {sent ? (
+      {state.kind === "sent" ? (
         <div className="flex flex-col items-center py-6 text-center">
           <BrandMark size={80} />
           <h3 className="mt-5 font-display text-2xl font-light leading-tight text-text-default">
             Thank you.
           </h3>
           <p className="mt-3 max-w-sm text-base leading-relaxed text-text-muted">
-            We will reply by tomorrow afternoon. If today is difficult, please
-            feel free to call us directly at +63 (72) 562-0187.
+            We have your enquiry and will be in touch.
           </p>
+          <div className="mt-6">
+            <CallUsFallback lead="If today is difficult:" />
+          </div>
         </div>
       ) : (
         <>
@@ -164,10 +180,11 @@ function PricingInquiryForm({
             </div>
             <button
               type="submit"
-              className="inline-flex items-center gap-2 rounded border border-primary bg-primary px-5 py-3 text-sm font-medium text-primary-fg transition-colors hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-2 focus-visible:ring-offset-surface-base"
+              disabled={sending}
+              className="inline-flex items-center gap-2 rounded border border-primary bg-primary px-5 py-3 text-sm font-medium text-primary-fg transition-colors hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-2 focus-visible:ring-offset-surface-base disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Send inquiry
-              <ArrowRight size={16} aria-hidden />
+              {sending ? "Sending…" : "Send inquiry"}
+              {!sending && <ArrowRight size={16} aria-hidden />}
             </button>
           </div>
         </>

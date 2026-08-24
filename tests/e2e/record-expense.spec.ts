@@ -14,7 +14,9 @@
  * test-user seed.
  */
 
-import { test, expect, devices } from "@playwright/test";
+import { test, expect } from "@playwright/test";
+
+import { MOBILE_PROFILE } from "./helpers/mobile-profile";
 
 test.describe("expense recording — unauthenticated", () => {
   test("/expenses redirects unauthenticated users to /login", async ({
@@ -33,7 +35,7 @@ test.describe("expense recording — unauthenticated", () => {
 });
 
 test.describe("expense recording — mobile profile", () => {
-  test.use({ ...devices["Pixel 5"] });
+  test.use(MOBILE_PROFILE);
   test("mobile viewport reaches the login redirect cleanly", async ({
     page,
   }) => {

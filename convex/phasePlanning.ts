@@ -267,53 +267,68 @@ export const seedDefaultPhases = mutationGeneric({
   ): Promise<{ seeded: boolean; count: number }> => {
     const auth = await requireRole(ctx, ["admin"]);
 
-    const existing = await ctx.db.query("phases").first();
-    if (existing !== null) {
-      return { seeded: false, count: 0 };
-    }
-
+    // Idempotent "ensure", keyed by phase number: insert any missing
+    // parcel, and backfill `sectionNames` on a parcel that was seeded
+    // before that field existed (so the live runway can find its lots).
+    // Safe to re-run.
     const now = Date.now();
+    let inserted = 0;
+    let updated = 0;
     for (const phase of DEFAULT_PHASES) {
-      const row: {
-        number: number;
-        name: string;
-        sectionsLabel: string;
-        sectionNames: string[];
-        stage: PhaseStage;
-        plannedLotCount: number;
-        availableLotCount: number;
-        monthlyAbsorption: number;
-        surveyLeadWeeks: number;
-        projectedSelloutLabel?: string;
-        readyByLabel?: string;
-        readiness: ReadinessItem[];
-        isRetired: boolean;
-        createdAt: number;
-        createdBy: typeof auth.userId;
-      } = {
-        number: phase.number,
-        name: phase.name,
-        sectionsLabel: phase.sectionsLabel,
-        sectionNames: phase.sectionNames,
-        stage: phase.stage,
-        plannedLotCount: phase.plannedLotCount,
-        availableLotCount: phase.availableLotCount,
-        monthlyAbsorption: phase.monthlyAbsorption,
-        surveyLeadWeeks: phase.surveyLeadWeeks,
-        readiness: phase.readiness,
-        isRetired: false,
-        createdAt: now,
-        createdBy: auth.userId,
-      };
-      if (phase.projectedSelloutLabel !== undefined) {
-        row.projectedSelloutLabel = phase.projectedSelloutLabel;
+      const existing = await ctx.db
+        .query("phases")
+        .withIndex("by_number", (q) => q.eq("number", phase.number))
+        .first();
+
+      if (existing === null) {
+        const row: {
+          number: number;
+          name: string;
+          sectionsLabel: string;
+          sectionNames: string[];
+          stage: PhaseStage;
+          plannedLotCount: number;
+          availableLotCount: number;
+          monthlyAbsorption: number;
+          surveyLeadWeeks: number;
+          projectedSelloutLabel?: string;
+          readyByLabel?: string;
+          readiness: ReadinessItem[];
+          isRetired: boolean;
+          createdAt: number;
+          createdBy: typeof auth.userId;
+        } = {
+          number: phase.number,
+          name: phase.name,
+          sectionsLabel: phase.sectionsLabel,
+          sectionNames: phase.sectionNames,
+          stage: phase.stage,
+          plannedLotCount: phase.plannedLotCount,
+          availableLotCount: phase.availableLotCount,
+          monthlyAbsorption: phase.monthlyAbsorption,
+          surveyLeadWeeks: phase.surveyLeadWeeks,
+          readiness: phase.readiness,
+          isRetired: false,
+          createdAt: now,
+          createdBy: auth.userId,
+        };
+        if (phase.projectedSelloutLabel !== undefined) {
+          row.projectedSelloutLabel = phase.projectedSelloutLabel;
+        }
+        if (phase.readyByLabel !== undefined) {
+          row.readyByLabel = phase.readyByLabel;
+        }
+        await ctx.db.insert("phases", row);
+        inserted++;
+      } else if (
+        existing.sectionNames === undefined ||
+        existing.sectionNames.length === 0
+      ) {
+        await ctx.db.patch(existing._id, { sectionNames: phase.sectionNames });
+        updated++;
       }
-      if (phase.readyByLabel !== undefined) {
-        row.readyByLabel = phase.readyByLabel;
-      }
-      await ctx.db.insert("phases", row);
     }
 
-    return { seeded: true, count: DEFAULT_PHASES.length };
+    return { seeded: inserted > 0, count: inserted + updated };
   },
 });

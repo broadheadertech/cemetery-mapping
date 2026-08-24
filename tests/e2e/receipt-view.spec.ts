@@ -14,7 +14,9 @@
  * read flow + the BIR-template visibility assertions.
  */
 
-import { test, expect, devices } from "@playwright/test";
+import { test, expect } from "@playwright/test";
+
+import { MOBILE_PROFILE } from "./helpers/mobile-profile";
 
 test.describe("receipt view — unauthenticated", () => {
   test("/receipts redirects unauthenticated users to /login", async ({
@@ -35,7 +37,7 @@ test.describe("receipt view — unauthenticated", () => {
 });
 
 test.describe("receipt view — mobile profile", () => {
-  test.use({ ...devices["Pixel 5"] });
+  test.use(MOBILE_PROFILE);
   test("mobile viewport reaches the login redirect cleanly", async ({
     page,
   }) => {

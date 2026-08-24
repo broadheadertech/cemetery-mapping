@@ -1,39 +1,58 @@
 "use client";
 
-import { useState } from "react";
 import { ArrowRight } from "lucide-react";
 import { BrandMark } from "./BrandMark";
+import { CallUsFallback, EnquiryErrorPanel } from "./CallUsFallback";
+import { useEnquirySubmit } from "./useEnquirySubmit";
 
 /**
- * Schedule-a-visit form. Submits to /dev/null for now and shows a
- * thank-you state — the Convex action that fans this out to email
- * + the staff inbox lands in a follow-up story. Once it's live the
- * form will POST to that endpoint instead of stashing in local state.
+ * Schedule-a-visit form.
+ *
+ * This used to call `setSent(true)` and throw the visitor's details
+ * away while telling them "a care director will call within the
+ * working day" — a promise nothing in the system could keep. It now
+ * writes an `enquiries` row through `enquiries:submitEnquiry` and
+ * schedules a staff notification.
+ *
+ * Two rules the old version broke, worth keeping in view for anyone
+ * editing this:
+ *
+ *   1. The thank-you renders ONLY after the mutation resolves. A
+ *      failure shows the failure and the phone number, never a
+ *      thank-you.
+ *   2. The success copy promises only what the system delivers. Staff
+ *      get an email and a queue entry; that supports "we have your
+ *      request and will call to confirm". It does not support a
+ *      guaranteed time window, so the copy no longer states one.
  */
 export function ScheduleVisitForm() {
-  const [sent, setSent] = useState(false);
+  const { state, onSubmit, reset } = useEnquirySubmit("visit");
 
-  function onSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setSent(true);
-  }
-
-  if (sent) {
+  if (state.kind === "sent") {
     return (
       <div className="border-t-[3px] border-accent-gold bg-surface-base p-8 text-center sm:p-10">
         <div className="mx-auto flex flex-col items-center">
           <BrandMark size={80} />
           <h3 className="mt-5 font-display text-2xl font-light leading-tight text-text-default">
-            We’ll be in touch.
+            We have your request.
           </h3>
           <p className="mt-3 max-w-sm text-base leading-relaxed text-text-muted">
-            A care director will call within the working day to confirm. There
-            is no preparation needed for your first visit — come as you are.
+            A care director will call to confirm your visit. There is no
+            preparation needed — come as you are.
           </p>
+          <div className="mt-6">
+            <CallUsFallback lead="If you would rather not wait:" />
+          </div>
         </div>
       </div>
     );
   }
+
+  if (state.kind === "error") {
+    return <EnquiryErrorPanel message={state.message} onRetry={reset} />;
+  }
+
+  const sending = state.kind === "sending";
 
   return (
     <form
@@ -87,11 +106,15 @@ export function ScheduleVisitForm() {
         </div>
         <button
           type="submit"
-          className="inline-flex items-center gap-2 rounded border border-primary bg-primary px-5 py-3 text-sm font-medium text-primary-fg transition-colors hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-2 focus-visible:ring-offset-surface-base"
+          disabled={sending}
+          className="inline-flex items-center gap-2 rounded border border-primary bg-primary px-5 py-3 text-sm font-medium text-primary-fg transition-colors hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-2 focus-visible:ring-offset-surface-base disabled:cursor-not-allowed disabled:opacity-60"
         >
-          Send request
-          <ArrowRight size={16} aria-hidden />
+          {sending ? "Sending…" : "Send request"}
+          {!sending && <ArrowRight size={16} aria-hidden />}
         </button>
+      </div>
+      <div className="mt-6 border-t border-surface-border pt-5">
+        <CallUsFallback />
       </div>
     </form>
   );

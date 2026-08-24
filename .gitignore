@@ -54,3 +54,6 @@ next-env.d.ts
 # bundled by scripts/build-sw.mjs into public/sw.js during `npm run build`.
 public/sw.js
 public/sw.js.map
+
+# Windows/MSYS crash dumps
+*.stackdump

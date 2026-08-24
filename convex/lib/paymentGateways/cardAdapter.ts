@@ -78,13 +78,13 @@ export const cardAdapter: IGatewayAdapter = {
   async createIntent(
     args: GatewayCreateIntentArgs,
   ): Promise<GatewayCreateIntentResult> {
-    const base = process.env.CARD_API_BASE_URL ?? "";
+    const base = args.credentials.apiBaseUrl.trim();
     if (base.length === 0) {
       // Production refuses to fall through to the mock URL — see the
       // matching guard in `gcashAdapter.ts` (P0-1).
       if (process.env.NODE_ENV === "production") {
         throw new Error(
-          "configuration_error: CARD_API_BASE_URL is not set in production",
+          "configuration_error: card has no API base URL — set it at /admin/settings/payment-gateways or via CARD_API_BASE_URL",
         );
       }
       const params = new URLSearchParams({
@@ -103,7 +103,7 @@ export const cardAdapter: IGatewayAdapter = {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: `Bearer ${process.env.CARD_API_KEY ?? ""}`,
+        authorization: `Bearer ${args.credentials.apiKey}`,
       },
       body: JSON.stringify({
         amount: args.amountCents,

@@ -105,6 +105,9 @@ export interface InstallmentTermsPanelProps {
    * defense in depth. Defaults to empty (treat as non-admin).
    */
   userRoles?: ReadonlyArray<string>;
+  /** Deep-link target from `/sales/new?lotId=…` — pre-selects the lot
+   *  once the picker's available-lots list loads. */
+  initialLotId?: string;
 }
 
 function isoDateNDaysAhead(days: number): string {
@@ -118,6 +121,7 @@ function isoDateNDaysAhead(days: number): string {
 
 export function InstallmentTermsPanel({
   userRoles = [],
+  initialLotId,
 }: InstallmentTermsPanelProps) {
   const router = useRouter();
   const idempotencyKey = useIdempotencyKey();
@@ -439,6 +443,7 @@ export function InstallmentTermsPanel({
         <LotPicker
           value={selectedLot?.lotId ?? ""}
           onSelect={handleLotSelected}
+          autoSelectLotId={initialLotId}
         />
         <input type="hidden" {...register("lotId")} />
         {errors.lotId !== undefined && (

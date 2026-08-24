@@ -5,7 +5,7 @@ import { FindAGravePageClient } from "@/components/marketing/FindAGravePageClien
 export const metadata: Metadata = {
   title: "Find a Grave",
   description:
-    "Six gardens, 2,134 lots. Tap any plot for live availability, or search the registry by occupant name.",
+    "Six gardens, 2,134 lots. Tap any plot for live availability, or ask our office to locate a specific grave for you.",
 };
 
 export default function FindAGravePage() {
@@ -22,8 +22,8 @@ export default function FindAGravePage() {
             </h1>
             <span aria-hidden className="mt-6 block h-px w-16 bg-accent-gold" />
             <p className="mt-6 max-w-xl text-lg leading-relaxed text-text-muted">
-              Six gardens, 2,134 lots. Tap any plot for live availability, or
-              search by occupant name below.
+              Six gardens, 2,134 lots. Tap any plot for live availability. To
+              find a particular grave, our office will look it up for you.
             </p>
           </div>
           <div className="w-full max-w-md">

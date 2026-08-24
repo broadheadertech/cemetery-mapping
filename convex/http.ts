@@ -58,6 +58,73 @@ const handleGatewayWebhookRef = makeFunctionReference<
   void
 >("portal:handleGatewayWebhook");
 
+/**
+ * Error-log capture from an HTTP action.
+ *
+ * Every rejection branch below used to return a bare status code and
+ * leave nothing behind. That is the worst place in the system for
+ * silence: a mistyped `GCASH_WEBHOOK_SECRET` produces a steady stream
+ * of 401s that the gateway reports to nobody here, so payments simply
+ * stop landing and the first symptom is a customer asking where their
+ * receipt is. Recording the rejection turns a silent outage into a
+ * row on /admin/errors.
+ */
+/**
+ * Webhook secrets now resolve from the environment OR from the
+ * `paymentGatewayConfig` table an admin edits — see
+ * `convex/lib/gatewayCredentials.ts`. Reading the env var directly
+ * here would silently ignore anything configured through the UI, so
+ * this route asks the resolver.
+ */
+const getGatewayCredentialsRef = makeFunctionReference<
+  "query",
+  { gateway: GatewayId },
+  {
+    apiBaseUrl: string;
+    apiKey: string;
+    webhookSecret: string;
+    isEnabled: boolean;
+    mode: "sandbox" | "live";
+    source: "env" | "database" | "unset";
+  }
+>("paymentGatewayConfig:internal_getCredentials");
+
+const captureErrorRef = makeFunctionReference<
+  "mutation",
+  {
+    source: string;
+    message: string;
+    severity?: "error" | "warning";
+    context?: Record<string, unknown>;
+  },
+  null
+>("errorLog:internal_captureError");
+
+/**
+ * Fire-and-forget capture. Swallows its own failures — observability
+ * must never change the response a gateway receives.
+ */
+async function captureWebhookIssue(
+  ctx: { runMutation: (ref: never, args: never) => Promise<unknown> },
+  source: string,
+  message: string,
+  severity: "error" | "warning",
+  context?: Record<string, unknown>,
+): Promise<void> {
+  try {
+    const args: {
+      source: string;
+      message: string;
+      severity: "error" | "warning";
+      context?: Record<string, unknown>;
+    } = { source, message, severity };
+    if (context !== undefined) args.context = context;
+    await ctx.runMutation(captureErrorRef as never, args as never);
+  } catch {
+    // Nothing useful left to do — the caller's response is what matters.
+  }
+}
+
 const GATEWAY_IDS: readonly GatewayId[] = ["gcash", "maya", "card"];
 
 for (const gateway of GATEWAY_IDS) {
@@ -68,33 +135,82 @@ for (const gateway of GATEWAY_IDS) {
     handler: httpActionGeneric(async (ctx, req: Request): Promise<Response> => {
       const rawBody = await req.text();
       const sig = req.headers.get(adapter.signatureHeader) ?? "";
-      const secret = process.env[`${gateway.toUpperCase()}_WEBHOOK_SECRET`] ?? "";
+      let secret = "";
+      try {
+        const credentials = await ctx.runQuery(getGatewayCredentialsRef, {
+          gateway,
+        });
+        secret = credentials.webhookSecret;
+      } catch {
+        // Fall through with an empty secret — the branch below reports
+        // it as a configuration error, which is the right outcome
+        // whether the resolver failed or the secret was never set.
+        secret = "";
+      }
       if (secret.length === 0 || sig.length === 0) {
+        // Distinguish the two: a missing SECRET is our misconfiguration
+        // and every payment for this gateway is failing; a missing
+        // SIGNATURE is someone else's malformed request.
+        await captureWebhookIssue(
+          ctx,
+          `webhook:${gateway}`,
+          secret.length === 0
+            ? `No webhook secret configured for ${gateway} — every ${gateway} webhook is being rejected and payments are not landing. Set it at /admin/settings/payment-gateways or via ${gateway.toUpperCase()}_WEBHOOK_SECRET.`
+            : `Rejected a ${gateway} webhook with no ${adapter.signatureHeader} header.`,
+          secret.length === 0 ? "error" : "warning",
+        );
         return new Response("unauthorized", { status: 401 });
       }
       const ok = await adapter.verifyWebhookSignature(rawBody, sig, secret);
       if (!ok) {
+        await captureWebhookIssue(
+          ctx,
+          `webhook:${gateway}`,
+          `Rejected a ${gateway} webhook whose signature did not verify. Either the shared secret has rotated on the gateway side or the request is not from them.`,
+          "warning",
+        );
         return new Response("unauthorized", { status: 401 });
       }
       let parsed: unknown;
       try {
         parsed = JSON.parse(rawBody);
       } catch {
+        await captureWebhookIssue(
+          ctx,
+          `webhook:${gateway}`,
+          `A signature-verified ${gateway} webhook did not contain valid JSON.`,
+          "error",
+        );
         return new Response("bad request", { status: 400 });
       }
       let event;
       try {
         event = adapter.parseWebhookPayload(parsed);
-      } catch {
+      } catch (err) {
+        // Signature verified, so this IS the gateway — their payload
+        // shape has changed under us, or the adapter is wrong.
+        await captureWebhookIssue(
+          ctx,
+          `webhook:${gateway}`,
+          `Could not parse a verified ${gateway} webhook payload: ${err instanceof Error ? err.message : String(err)}`,
+          "error",
+        );
         return new Response("bad request", { status: 400 });
       }
       try {
         await ctx.runMutation(handleGatewayWebhookRef, { gateway, event });
-      } catch {
+      } catch (err) {
         // Surface as 500 so the gateway retries. Idempotency anchor
         // inside the mutation (`paymentIntents.completedAt`) makes
         // re-delivery safe — a duplicate that already landed will
         // short-circuit cleanly on the next retry.
+        await captureWebhookIssue(
+          ctx,
+          `webhook:${gateway}`,
+          `Failed to post a verified ${gateway} payment: ${err instanceof Error ? err.message : String(err)}`,
+          "error",
+          { paymentIntentId: event.paymentIntentId, status: event.status },
+        );
         return new Response("internal", { status: 500 });
       }
       return new Response("ok", { status: 200 });
@@ -179,6 +295,16 @@ http.route({
       secret.trim().length === 0 ||
       sig.length === 0
     ) {
+      const secretMissing =
+        typeof secret !== "string" || secret.trim().length === 0;
+      await captureWebhookIssue(
+        ctx,
+        "webhook:email-bounce",
+        secretMissing
+          ? "EMAIL_WEBHOOK_SECRET is not set — bounce events are all being rejected, so hard-bounced addresses keep receiving reminders."
+          : "Rejected a bounce webhook with no signature header.",
+        secretMissing ? "error" : "warning",
+      );
       return new Response("unauthorized", { status: 401 });
     }
 
@@ -193,6 +319,12 @@ http.route({
       },
     );
     if (!ok) {
+      await captureWebhookIssue(
+        ctx,
+        "webhook:email-bounce",
+        "Rejected a bounce webhook whose signature did not verify. Either the provider's signing secret has rotated or the request is not from them.",
+        "warning",
+      );
       return new Response("unauthorized", { status: 401 });
     }
 
@@ -201,6 +333,12 @@ http.route({
       parsed = JSON.parse(rawBody);
     } catch {
       console.warn("[email-bounce-webhook] malformed JSON; ack with 200");
+      await captureWebhookIssue(
+        ctx,
+        "webhook:email-bounce",
+        "A signature-verified bounce webhook did not contain valid JSON. Acked with 200 so the provider stops retrying.",
+        "error",
+      );
       return new Response("ok", { status: 200 });
     }
 
@@ -215,6 +353,13 @@ http.route({
       console.error(
         "[email-bounce-webhook] mutation failed",
         (e as Error).message,
+      );
+      await captureWebhookIssue(
+        ctx,
+        "webhook:email-bounce",
+        `Failed to apply bounce events: ${e instanceof Error ? e.message : String(e)}`,
+        "error",
+        { eventCount: events.length },
       );
       return new Response("internal", { status: 500 });
     }

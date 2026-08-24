@@ -1,7 +1,7 @@
 # Operations Runbook
 
 - **Status:** Starter (Story 2.8 created the PII-encryption section; Story 5.6 added the Database backups section; Stories 5.5+, 5.7+, 6.x will continue to expand this file).
-- **Last updated:** 2026-05-18
+- **Last updated:** 2026-08-23
 
 This document is the on-call / operator-of-record reference for the cemetery-mapping system. It is meant to be opened DURING an incident or compliance request, not read end-to-end on a regular cadence.
 
@@ -25,6 +25,128 @@ The Phase 1 deployment has **no seed script**. The first admin is bootstrapped a
    The internal mutation re-runs the same "only when `userRoles` is empty" guard, then grants `admin` to the passed `userId`.
 
 After the bootstrap, **disable self-signup in the UI** (Story 1.3 will remove the affordance entirely; until then, do not advertise the link to non-admin staff).
+
+## Payment gateways (`/admin/settings/payment-gateways`)
+
+GCash, Maya, and a card processor. The adapters in `convex/lib/paymentGateways/` have live fetch paths; what decides whether a payment reaches the provider is whether credentials resolve.
+
+### Two sources, env wins
+
+1. **Environment variables** — `<GATEWAY>_API_BASE_URL`, `<GATEWAY>_API_KEY`, `<GATEWAY>_WEBHOOK_SECRET`. When the base URL is set here, this source wins outright and the database row is ignored. The admin page shows the gateway as **From environment** and hides the form.
+2. **The admin page**, stored in `paymentGatewayConfig`.
+
+Env-first is deliberate. Keeping secrets in the Convex environment is the stronger posture, and an operator who chooses it must not have it silently overridden by a later UI edit.
+
+### Why the database option exists at all
+
+Setting env vars means `npx convex env set` from a developer's terminal. The cemetery has no developer on staff, so go-live and every later key rotation would require calling one — and a webhook secret nobody on site can rotate is a secret that never gets rotated. That is the trade-off being made: a weaker storage location in exchange for credentials the cemetery can actually manage.
+
+What bounds it (all four are load-bearing — see the schema comment on `paymentGatewayConfig`):
+
+- Secrets never leave the server. The admin query returns a masked tail (`••••1234`); only internal resolvers read the real value.
+- Admin only, read and write.
+- Every change is audited with the values redacted — the trail shows a key was rotated and by whom, never to what.
+- Excluded from the BIR archival export. Live credentials must not land in a ten-year S3 bucket.
+
+### Going live with a gateway
+
+1. Get merchant credentials from the provider (sandbox first).
+2. Open `/admin/settings/payment-gateways`, set the base URL (https only), the API key, and the webhook signing secret.
+3. Register the webhook endpoint with the provider: `https://beaming-boar-935.convex.site/api/<gateway>-webhook`. See § Convex deployment URLs.
+4. Leave **Mode** on Sandbox and tick "Accept payments". Run one end-to-end payment.
+5. Switch the base URL and key to production values, set Mode to Live.
+
+### Turning one off
+
+Untick "Accept payments". The credentials stay, so switching back on later does not mean retyping a key — which matters when you are turning a gateway off during an incident.
+
+### Failure signals
+
+A misconfiguration shows up in [`/admin/errors`](#error-log-adminerrors) under `webhook:<gateway>`, not in silence:
+
+- *No webhook secret configured* — every callback is being 401'd, so customers are paying and the payments are not landing. The most expensive failure in the system.
+- *Signature did not verify* — usually the provider rotated the secret; copy the new one in.
+- *Gateway is switched off* — someone unticked the box and the portal is refusing intents.
+
+---
+
+## Website enquiries (`/enquiries`)
+
+The public marketing site has two forms — schedule-a-visit on `/contact` and the pricing enquiry on `/pricing`. Both write an `enquiries` row and schedule a staff notification email.
+
+**Someone must watch this queue.** Every row is a person who was told we would contact them. The sidebar badges the New count for admin and office staff.
+
+### Required configuration
+
+| Variable | Consequence if unset |
+| --- | --- |
+| `ENQUIRY_NOTIFY_TO` | Enquiries save and appear in the queue, but no email goes to the office. The error log records it on every submission. |
+| `RESEND_API_KEY`, `EMAIL_FROM` | Same — queued, not emailed. |
+
+Neither has a default. Guessing an office inbox would mean guessing wrong silently, which is the failure mode this whole feature exists to remove.
+
+### "Not emailed to the office" badge
+
+A row carrying this badge arrived but its notification failed, so the only person who knows about it is whoever is reading the queue. The cause is in [`/admin/errors`](#error-log-adminerrors) under `action:sendEnquiryNotification`. The enquiry itself is intact — the queue is the system of record, the email is a convenience.
+
+### Rate limits
+
+`submitEnquiry` is public and unauthenticated. Two windows bound it, both in `convex/enquiries.ts`:
+
+- **Per contact** — 3 per hour, keyed on the contact string with punctuation and case stripped.
+- **Global** — 60 per hour, which bounds table growth under abuse.
+
+Convex mutations cannot see the client IP (only an `httpAction` can), so there is no per-IP throttle. The global cap is the load-bearing protection. If the queue is ever flooded, raising the caps is not the fix — moving the endpoint to an HTTP route with per-IP limiting is.
+
+### Retention — open question
+
+Nothing prunes this table. These rows hold names and contact details of people who may never become customers, which is a Data Privacy Act consideration the cemetery should rule on: how long do we keep an enquiry nobody converted? Once they answer, add a cron alongside the other sweeps in `convex/crons.ts`.
+
+### What is NOT built
+
+Public grave search. `FindGraveSearch` used to be a name/year search box that silently did nothing — the target page never read the query. It is now a "call the office and we will look it up" panel. Turning it back into a real search is blocked on the cemetery deciding whether occupant names should be publicly searchable with no login; the steps are listed in that component's header.
+
+---
+
+## Error log (`/admin/errors`)
+
+**This is the first place to look when someone asks "did anything break?"**
+
+Before the `errorLog` table existed, a failed cron, a rejected payment webhook, or a document that exhausted its retries left a line in `npx convex logs` and nothing else. Convex log retention is short, nobody here is on call, and the first symptom of a silent failure was a customer asking where their receipt was.
+
+### What lands there
+
+| Source prefix | What it means |
+| --- | --- |
+| `webhook:gcash` / `webhook:maya` / `webhook:card` | A payment webhook was rejected or failed to post. |
+| `webhook:email-bounce` | A bounce/complaint event was rejected or could not be applied. |
+| `cron:sweepContractPdfs` and siblings | Documents past the retry cap — they will not generate without a manual retry. |
+
+### How to read it
+
+Rows are **groups**, not occurrences: one row per distinct failure, with an occurrence count and a first/last-seen window. A cron failing every ten minutes all weekend is one row at `count: 288`. Grouping is by `source` + a normalised message (ids, numbers, and quoted values are collapsed), so the same failure across different lots stays one row.
+
+"Mark resolved" is an **acknowledgement, not a fix**. If the same failure recurs, the row reopens itself and the count keeps climbing — deliberate, because "I looked at this" and "it came back" are different facts.
+
+### The two entries that mean money is being lost right now
+
+Both are `severity: error` and both are silent everywhere else:
+
+1. **`<GATEWAY>_WEBHOOK_SECRET is not set`** — every webhook from that gateway is being 401'd. Customers are paying and the payments are not landing. Fix: `npx convex env set GCASH_WEBHOOK_SECRET <value>` (and the same for `MAYA_` / `CARD_`), then ask the gateway to replay the missed events.
+
+2. **`EMAIL_WEBHOOK_SECRET is not set`** — bounce events are all being rejected, so hard-bounced addresses keep receiving reminders and the sender reputation degrades. Fix: `npx convex env set EMAIL_WEBHOOK_SECRET <value>`.
+
+A run of `signature did not verify` warnings from one gateway usually means the shared secret was rotated on their side and not here.
+
+### What it is NOT
+
+Not an audit log. The audit log (`auditLog`) is an append-only legal record of what people did and is authoritative about business state. The error log is an operational record of what broke, is lossy by design (latest occurrence detail only), and is authoritative about nothing.
+
+### Retention
+
+There is no automatic pruning yet. The grouping keeps growth proportional to the number of *distinct* failures rather than occurrences, which is what makes that acceptable for now. If the table ever grows past a few hundred groups, that is itself the signal — something is generating novel failures continuously.
+
+---
 
 ## PII encryption posture
 
@@ -550,6 +672,7 @@ Forbidden phrasing (audit any new copy against this list):
 
 ## References
 
+- [Go-live checklist](./go-live-checklist.md) — what is still outstanding before the cemetery can take real money, and who can clear each item.
 - [ADR-0007 — PII encryption at rest](./adr/0007-pii-encryption.md)
 - [ADR-0017 — Database backups](./adr/0017-database-backups.md)
 - [ADR-0018 — Archival exports](./adr/0018-archival-export.md)

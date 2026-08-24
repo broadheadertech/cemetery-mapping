@@ -19,7 +19,9 @@
  *      button and form inputs.
  */
 
-import { test, expect, devices } from "@playwright/test";
+import { test, expect } from "@playwright/test";
+
+import { MOBILE_PROFILE } from "./helpers/mobile-profile";
 
 test.describe("/portal/login — unauthenticated render", () => {
   test("renders the customer sign-in form", async ({ page }) => {
@@ -76,7 +78,7 @@ test.describe("/portal — route protection", () => {
 });
 
 test.describe("/portal/login — mobile profile", () => {
-  test.use({ ...devices["Pixel 5"] });
+  test.use(MOBILE_PROFILE);
 
   test("renders without horizontal overflow", async ({ page }) => {
     await page.goto("/portal/login");

@@ -43,6 +43,10 @@ export const CLIENT_ERROR_CODES = {
   // overlap + chapel + pathway overlap). Mirrored from
   // `convex/lib/errors.ts:SCHEDULING_CONFLICT`.
   SCHEDULING_CONFLICT: "SCHEDULING_CONFLICT",
+  // Throttling. Thrown by the pre-sign-in rate limiter
+  // (`convex/authRateLimit.ts`) and by the public enquiry form
+  // (`convex/enquiries.ts`).
+  RATE_LIMITED: "RATE_LIMITED",
 } as const;
 
 export type ClientErrorCode =
@@ -58,6 +62,12 @@ export interface TranslatedError {
 }
 
 const MESSAGES: Record<ClientErrorCode, TranslatedError> = {
+  RATE_LIMITED: {
+    headline: "Too many attempts",
+    detail:
+      "Please wait a few minutes and try again, or call us if it is urgent.",
+    retryable: true,
+  },
   UNAUTHENTICATED: {
     headline: "Sign in to continue",
     detail: "Your session has ended. Sign in again to resume.",

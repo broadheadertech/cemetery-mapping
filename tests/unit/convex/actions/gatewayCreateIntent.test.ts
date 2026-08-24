@@ -152,10 +152,37 @@ describe("gatewayCreateIntent — action handler failure path (P0-3)", () => {
     vi.restoreAllMocks();
   });
 
-  function makeCtx() {
+  /**
+   * `credentials` defaults to the unconfigured shape, which is what
+   * drives the adapter down its mock / production-refusal paths — the
+   * two branches these tests were written to cover. Pass an override
+   * to exercise a configured gateway.
+   */
+  function makeCtx(
+    credentials: {
+      apiBaseUrl: string;
+      apiKey: string;
+      webhookSecret: string;
+      isEnabled: boolean;
+      mode: "sandbox" | "live";
+      source: "env" | "database" | "unset";
+    } = {
+      apiBaseUrl: "",
+      apiKey: "",
+      webhookSecret: "",
+      isEnabled: false,
+      mode: "sandbox",
+      source: "unset",
+    },
+  ) {
     const calls: Array<{ ref: unknown; args: Record<string, unknown> }> = [];
     return {
       ctx: {
+        // The action resolves credentials before calling the adapter —
+        // they can come from the environment or from the
+        // `paymentGatewayConfig` table, and only a ctx-holding caller
+        // can read the latter.
+        runQuery: vi.fn(async () => credentials),
         runMutation: vi.fn(async (ref: unknown, args: Record<string, unknown>) => {
           calls.push({ ref, args });
         }),
@@ -215,5 +242,33 @@ describe("gatewayCreateIntent — action handler failure path (P0-3)", () => {
     expect(args.paymentIntentId).toBe("intent-2");
     expect(args.redirectUrl).toMatch(/^\/portal\/pay\/mock-gateway\?/);
     expect(args.gatewayIntentId).toContain("gcash");
+  });
+
+  it("refuses when the gateway is configured but an admin switched it off", async () => {
+    // Charging a customer through a route the cemetery has disabled is
+    // worse than failing on the way in, so the action refuses before
+    // it calls out rather than relying on the adapter.
+    const { ctx, calls } = makeCtx({
+      apiBaseUrl: "https://gw.example/v1",
+      apiKey: "sk_test",
+      webhookSecret: "whsec",
+      isEnabled: false,
+      mode: "live",
+      source: "database",
+    });
+    const consoleErr = vi.spyOn(console, "error").mockImplementation(() => {});
+    const run = handlerOf(gatewayCreateIntent);
+    await run(ctx, {
+      paymentIntentId: "intent-off",
+      gateway: "gcash",
+      amountCents: 100,
+      currency: "PHP",
+      returnUrl: "/portal/pay/return?intent=intent-off",
+      contractId: "contract-1",
+      customerId: "customer-1",
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.args.failureReason).toBe("configuration_error");
+    expect(consoleErr).toHaveBeenCalled();
   });
 });

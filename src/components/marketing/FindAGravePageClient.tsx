@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import {
@@ -9,6 +10,28 @@ import {
 } from "./CemeteryMapSVG";
 import { MapLegend } from "./MapLegend";
 import { cn } from "@/lib/cn";
+
+/**
+ * Three.js is far too heavy for a marketing page's first load, so the
+ * 3D view is fetched only when a visitor asks for it. `ssr: false`
+ * because WebGL is browser-only.
+ */
+const CemeteryMap3D = dynamic(
+  () => import("./CemeteryMap3D").then((m) => m.CemeteryMap3D),
+  {
+    ssr: false,
+    loading: () => (
+      <div
+        role="status"
+        className="flex h-[24rem] items-center justify-center rounded bg-surface-emphasis text-sm text-text-muted sm:h-[30rem]"
+      >
+        Preparing the 3D view&hellip;
+      </div>
+    ),
+  },
+);
+
+type ViewMode = "plan" | "three";
 
 type Filter = "all" | "available" | "reserved" | "occupied";
 
@@ -40,11 +63,15 @@ const DEFAULT_PICK: CemeterySectionPick = {
 export function FindAGravePageClient() {
   const [filter, setFilter] = useState<Filter>("all");
   const [selected, setSelected] = useState<CemeterySectionPick>(DEFAULT_PICK);
+  // The flat plan is the default: it is the accessible view, and it
+  // costs nothing to load. 3D is an enhancement a visitor opts into.
+  const [view, setView] = useState<ViewMode>("plan");
 
   return (
     <section className="bg-surface-emphasis">
       <div className="mx-auto grid max-w-7xl grid-cols-1 gap-8 px-4 py-12 sm:px-6 lg:grid-cols-[1.6fr_1fr] lg:px-8">
         <div className="rounded border border-surface-border bg-surface-base p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
           <div
             role="group"
             aria-label="Filter lots by status"
@@ -70,8 +97,53 @@ export function FindAGravePageClient() {
               );
             })}
           </div>
+
+          <div
+            role="group"
+            aria-label="Map view"
+            className="flex overflow-hidden rounded-full border border-surface-border"
+          >
+            {(
+              [
+                { id: "plan", label: "Plan" },
+                { id: "three", label: "3D" },
+              ] as const
+            ).map((v) => {
+              const active = view === v.id;
+              return (
+                <button
+                  key={v.id}
+                  type="button"
+                  onClick={() => setView(v.id)}
+                  aria-pressed={active}
+                  className={cn(
+                    "px-4 py-1.5 text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring",
+                    active
+                      ? "bg-primary text-primary-fg"
+                      : "text-text-default hover:text-primary",
+                  )}
+                >
+                  {v.label}
+                </button>
+              );
+            })}
+          </div>
+          </div>
+
           <div className="mt-5">
-            <CemeteryMapSVG interactive onSelect={setSelected} />
+            {view === "plan" ? (
+              <CemeteryMapSVG
+                interactive
+                onSelect={setSelected}
+                selectedId={selected.id}
+              />
+            ) : (
+              <CemeteryMap3D
+                onSelect={setSelected}
+                selectedId={selected.id}
+                filter={filter}
+              />
+            )}
           </div>
           <div className="mt-5 border-t border-surface-border pt-4">
             <MapLegend />

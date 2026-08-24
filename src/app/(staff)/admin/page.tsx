@@ -127,6 +127,30 @@ const GROUPS: AdminGroup[] = [
         description: "Approve or reject expenses that exceeded the threshold.",
       },
       {
+        href: "/admin/readiness",
+        title: "Go-live readiness",
+        description:
+          "What is still unconfigured on this deployment, checked live.",
+      },
+      {
+        href: "/admin/settings/payment-gateways",
+        title: "Payment gateways",
+        description:
+          "GCash, Maya, and card credentials. Required before the portal can take payments.",
+      },
+      {
+        href: "/admin/errors",
+        title: "Error log",
+        description:
+          "Failures recorded by scheduled jobs, webhooks, and document generation.",
+      },
+      {
+        href: "/admin/lot-import",
+        title: "Lot inventory import",
+        description:
+          "Load the lot inventory from a spreadsheet. Check before importing.",
+      },
+      {
         href: "/admin/gps-import",
         title: "GPS geometry import",
         description:

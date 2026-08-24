@@ -20,6 +20,7 @@ import {
   ClipboardCheck,
   LineChart,
   Boxes,
+  MessageSquare,
 } from "lucide-react";
 import type { Role } from "@/types/role";
 
@@ -45,9 +46,12 @@ import type { Role } from "@/types/role";
  * a return value of `0` means "hide the badge", `null`/`undefined`
  * means "not applicable / still loading". Story 6.7 adds the
  * `pendingExpenseApprovals` source — wired to
- * `convex/expenses.ts → listPendingApprovals`.
+ * `convex/expenses.ts → listPendingApprovals`. `newEnquiries` is wired
+ * to `convex/enquiries.ts → getEnquiryCounts`.
  */
-export type NavItemBadgeSource = "pendingExpenseApprovals";
+export type NavItemBadgeSource =
+  | "pendingExpenseApprovals"
+  | "newEnquiries";
 
 export interface NavItem {
   href: string;
@@ -123,6 +127,16 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
         label: "Family Estates",
         icon: Building2,
         requiredRoles: ["admin", "office_staff"],
+      },
+      {
+        // Visit requests and pricing questions from the public site.
+        // Badged because every unanswered row is a person who was told
+        // we would call them back.
+        href: "/enquiries",
+        label: "Enquiries",
+        icon: MessageSquare,
+        requiredRoles: ["admin", "office_staff"],
+        badgeSource: "newEnquiries",
       },
     ],
   },
@@ -253,6 +267,17 @@ const listPendingApprovalsForBadgeRef = makeFunctionReference<
 >("expenses:listPendingApprovals");
 
 /**
+ * New-enquiry count. A dedicated counts query rather than a list —
+ * unlike the approvals badge above, there was no existing list query
+ * to borrow, and counting is all the rail needs.
+ */
+const enquiryCountsForBadgeRef = makeFunctionReference<
+  "query",
+  Record<string, never>,
+  { new: number; contacted: number }
+>("enquiries:getEnquiryCounts");
+
+/**
  * Reactive nav-item badge count.
  *
  * Returns `undefined` while the underlying query is loading, and a
@@ -270,15 +295,23 @@ export function useNavItemBadgeCount(item: NavItem): number | undefined {
   // token) for every other nav item. Passing `"skip"` keeps the hook
   // call unconditional while leaving the subscription dormant unless the
   // item genuinely opts in.
-  const enabled = item.badgeSource === "pendingExpenseApprovals";
+  const approvalsEnabled = item.badgeSource === "pendingExpenseApprovals";
+  const enquiriesEnabled = item.badgeSource === "newEnquiries";
   const pending = useQuery(
     listPendingApprovalsForBadgeRef,
-    enabled ? {} : "skip",
+    approvalsEnabled ? {} : "skip",
   );
-  if (!enabled || pending === undefined) {
-    return undefined;
+  const enquiryCounts = useQuery(
+    enquiryCountsForBadgeRef,
+    enquiriesEnabled ? {} : "skip",
+  );
+  if (approvalsEnabled) {
+    return pending === undefined ? undefined : pending.length;
   }
-  return pending.length;
+  if (enquiriesEnabled) {
+    return enquiryCounts === undefined ? undefined : enquiryCounts.new;
+  }
+  return undefined;
 }
 
 /**

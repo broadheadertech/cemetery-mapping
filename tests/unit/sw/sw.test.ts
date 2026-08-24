@@ -1,4 +1,12 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  afterAll,
+  afterEach,
+  vi,
+} from "vitest";
 import { STALENESS_THRESHOLD_MS } from "@/lib/offline-cache";
 
 /**
@@ -81,6 +89,26 @@ const fakeClients = {
 let originalSelf: unknown;
 let originalCaches: unknown;
 let originalCrypto: unknown;
+let originalFetch: typeof globalThis.fetch;
+
+/**
+ * Default `fetch` stub.
+ *
+ * The SW's cache strategies keep working after the handler returns —
+ * stale-while-revalidate kicks off a background refresh, and the
+ * response promise resolves on a later tick. A test that restores the
+ * REAL `fetch` synchronously after `invokeFetch(...)` therefore leaves
+ * those continuations pointing at the network, and `https://app.example`
+ * does not resolve: vitest reports an unhandled `ENOTFOUND` rejection
+ * that is attributed to whichever test happened to be running.
+ *
+ * Fix: `fetch` is stubbed for the whole file, and `afterEach` restores
+ * THIS stub (not the real one) so a late continuation always lands on a
+ * harmless canned response. Individual tests still override it with
+ * their own `vi.fn()` when they need to assert on calls.
+ */
+const defaultFetchStub = (): typeof globalThis.fetch =>
+  vi.fn(async () => new Response("", { status: 200 })) as unknown as typeof globalThis.fetch;
 
 beforeAll(async () => {
   originalSelf = (globalThis as { self?: unknown }).self;
@@ -115,6 +143,9 @@ beforeAll(async () => {
     });
   }
 
+  originalFetch = globalThis.fetch;
+  globalThis.fetch = defaultFetchStub();
+
   // Loading the SW source registers all three listeners on our fakeSelf.
   await import("@/sw");
 });
@@ -140,6 +171,12 @@ afterAll(() => {
       value: originalCrypto,
     });
   }
+  globalThis.fetch = originalFetch;
+});
+
+// Never hand a test's trailing continuation the real network.
+afterEach(() => {
+  globalThis.fetch = defaultFetchStub();
 });
 
 /**
@@ -248,7 +285,7 @@ describe("service worker — fetch handler", () => {
     expect(harness.response).toBeNull();
   });
 
-  it("intercepts /lots navigation requests", () => {
+  it("intercepts /lots navigation requests", async () => {
     const req = new Request("https://app.example/lots", {
       method: "GET",
     });
@@ -259,14 +296,15 @@ describe("service worker — fetch handler", () => {
       get: () => "navigate",
     });
     // Mock fetch so the response promise resolves.
-    const originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn().mockResolvedValue(
       new Response("<html>cached</html>", { status: 200 }),
     );
     const harness = makeFetchEvent(req);
     invokeFetch(harness.event);
     expect(harness.response).not.toBeNull();
-    globalThis.fetch = originalFetch;
+    // Await it — otherwise the strategy's continuation runs after the
+    // test ends, against whatever `fetch` is installed by then.
+    await harness.response!;
   });
 
   it("does NOT cache Convex query POSTs targeting auth functions", async () => {
@@ -289,7 +327,6 @@ describe("service worker — fetch handler", () => {
     // Reset the data cache so we can detect a write attempt.
     cacheRegistry.delete("cm-data-v1-dev");
 
-    const originalFetch = globalThis.fetch;
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ roles: ["admin"] }), {
         status: 200,
@@ -311,8 +348,6 @@ describe("service worker — fetch handler", () => {
       expect(dataCache.store.size).toBe(0);
     }
     expect(fetchMock).toHaveBeenCalled();
-
-    globalThis.fetch = originalFetch;
   });
 
   it("caches Convex query POSTs for non-auth function paths", async () => {
@@ -332,7 +367,6 @@ describe("service worker — fetch handler", () => {
 
     cacheRegistry.delete("cm-data-v1-dev");
 
-    const originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ lots: [] }), {
         status: 200,
@@ -348,7 +382,5 @@ describe("service worker — fetch handler", () => {
     const dataCache = cacheRegistry.get("cm-data-v1-dev");
     expect(dataCache).toBeDefined();
     expect(dataCache!.store.size).toBe(1);
-
-    globalThis.fetch = originalFetch;
   });
 });

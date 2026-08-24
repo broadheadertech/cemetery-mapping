@@ -114,9 +114,13 @@ export type LotGeometry = {
  * per-cemetery-profile lookup driven by config; the constant lives in
  * exactly one place so swapping it out is a one-line change.
  */
+// Aringay, La Union — the actual cemetery. Matches the demo seed's
+// BASE_LAT/BASE_LNG and the client's DEFAULT_CEMETERY_BBOX centre, so a
+// newly-created (un-surveyed) lot defaults next to the real grounds
+// instead of ~200 km south in Metro Manila.
 export const DEFAULT_PLACEHOLDER_CENTROID: LatLng = {
-  lat: 14.6760,
-  lng: 121.0437,
+  lat: 16.3955,
+  lng: 120.3585,
 };
 
 /**

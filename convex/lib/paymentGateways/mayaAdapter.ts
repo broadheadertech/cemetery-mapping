@@ -9,8 +9,9 @@
  *
  * Phase 1 sandbox / mock-friendly behaviour: `createIntent` returns
  * a redirect URL pointing at the in-app `/portal/pay/mock-gateway?provider=maya&...`
- * placeholder. Production swap at credential availability is a fetch
- * against `process.env.MAYA_API_BASE_URL`.
+ * placeholder. Once a base URL is configured — at
+ * `/admin/settings/payment-gateways` or via `MAYA_API_BASE_URL` — the
+ * live fetch path runs instead.
  *
  * See `docs/runbook.md` § "Maya integration" for the credential-swap
  * procedure.
@@ -73,13 +74,13 @@ export const mayaAdapter: IGatewayAdapter = {
   async createIntent(
     args: GatewayCreateIntentArgs,
   ): Promise<GatewayCreateIntentResult> {
-    const base = process.env.MAYA_API_BASE_URL ?? "";
+    const base = args.credentials.apiBaseUrl.trim();
     if (base.length === 0) {
       // Production refuses to fall through to the mock URL — see the
       // matching guard in `gcashAdapter.ts` (P0-1).
       if (process.env.NODE_ENV === "production") {
         throw new Error(
-          "configuration_error: MAYA_API_BASE_URL is not set in production",
+          "configuration_error: maya has no API base URL — set it at /admin/settings/payment-gateways or via MAYA_API_BASE_URL",
         );
       }
       const params = new URLSearchParams({
@@ -98,7 +99,7 @@ export const mayaAdapter: IGatewayAdapter = {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: `Basic ${process.env.MAYA_API_KEY ?? ""}`,
+        authorization: `Basic ${args.credentials.apiKey}`,
       },
       body: JSON.stringify({
         totalAmount: { value: args.amountCents, currency: args.currency },

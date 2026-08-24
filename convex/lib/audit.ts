@@ -125,7 +125,8 @@ export type AuditEntityType =
   | "section"
   | "family_estate"
   | "ceremony"
-  | "plaque_draft";
+  | "plaque_draft"
+  | "enquiry";
 
 /**
  * PII field names that `redactPii` recognizes. Extend the set as new

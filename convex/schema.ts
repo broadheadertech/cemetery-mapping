@@ -126,6 +126,11 @@ export default defineSchema({
       v.literal("family_estate"),
       v.literal("ceremony"),
       v.literal("plaque_draft"),
+      // Public marketing enquiries. Staff status changes are audited
+      // ("we called them back" is a claim someone may check later);
+      // the enquiry arriving is not an operator action and emits
+      // nothing.
+      v.literal("enquiry"),
     ),
     entityId: v.string(),
     before: v.optional(v.any()),
@@ -135,6 +140,75 @@ export default defineSchema({
     .index("by_entity", ["entityType", "entityId", "timestamp"])
     .index("by_actor", ["actor", "timestamp"])
     .index("by_timestamp", ["timestamp"]),
+
+  /**
+   * Server-side error log — production observability.
+   *
+   * Until this table existed, a failed cron, a rejected gateway
+   * webhook, or a bounced provider call left a trace in
+   * `npx convex logs` and nowhere else. Convex log retention is
+   * short and the cemetery has no on-call engineer watching a
+   * terminal, so anything that failed overnight was effectively
+   * invisible until a person noticed the downstream symptom —
+   * a receipt that never arrived, an AR bucket that never moved.
+   *
+   * GROUPED, not append-only. One row per `fingerprint` (a stable
+   * source + normalised-message key), carrying an occurrence count
+   * and the most recent detail. A cron failing every ten minutes for
+   * a weekend produces ONE row with `count: 288`, not 288 rows that
+   * bury everything else and push the table toward the size where it
+   * becomes its own problem. The trade-off is deliberate: individual
+   * occurrence payloads are lost, the latest is kept. When a specific
+   * occurrence matters (a financial event), the audit log — which IS
+   * append-only — is the record that answers it.
+   *
+   * This is NOT the audit log and must never be used as one. The
+   * audit log is a legal record of what people did; this is an
+   * operational record of what broke. Nothing here is authoritative
+   * about business state.
+   *
+   * PII: `context` is `v.any()` and passes through `redactPii` at
+   * write time, the same helper `emitAudit` uses (ADR-0007 keeps PII
+   * out of secondary stores). `message` and `stack` come from thrown
+   * errors and are NOT redacted — code must not put customer data in
+   * an error message, which is the existing convention in
+   * `convex/lib/errors.ts`.
+   *
+   * Field notes:
+   *   - `fingerprint` — grouping key. Derived, never operator-typed.
+   *   - `source` — where it happened, e.g. `cron:reflagExpired`,
+   *     `webhook:gcash`, `action:sendEmailReminder`.
+   *   - `severity` — `error` (something failed) or `warning`
+   *     (something was rejected as designed but an operator should
+   *     know, e.g. a webhook with a bad signature).
+   *   - `count` / `firstSeenAt` / `lastSeenAt` — occurrence window.
+   *   - `isResolved` — an admin acknowledging they have dealt with
+   *     it. A later occurrence reopens the row (sets it false again),
+   *     because "it happened again" is exactly what an operator needs
+   *     to see after they thought it was fixed.
+   *
+   * Indexes:
+   *   - `by_fingerprint` — the upsert lookup on every capture.
+   *   - `by_lastSeenAt` — the admin list, newest first.
+   *   - `by_resolved_lastSeen` — the default "unresolved only" view.
+   */
+  errorLog: defineTable({
+    fingerprint: v.string(),
+    source: v.string(),
+    severity: v.union(v.literal("error"), v.literal("warning")),
+    message: v.string(),
+    stack: v.optional(v.string()),
+    context: v.optional(v.any()),
+    count: v.number(),
+    firstSeenAt: v.number(),
+    lastSeenAt: v.number(),
+    isResolved: v.boolean(),
+    resolvedAt: v.optional(v.number()),
+    resolvedBy: v.optional(v.id("users")),
+  })
+    .index("by_fingerprint", ["fingerprint"])
+    .index("by_lastSeenAt", ["lastSeenAt"])
+    .index("by_resolved_lastSeen", ["isResolved", "lastSeenAt"]),
 
   /**
    * Lot inventory table (Story 1.8, FR6 / FR8 / FR10).
@@ -3317,6 +3391,168 @@ export default defineSchema({
    *   - `by_attemptedAt` — daily cleanup sweep filters by age via this
    *     index instead of scanning the whole table.
    */
+  /**
+   * Public enquiries from the marketing site — schedule-a-visit
+   * requests and pricing questions.
+   *
+   * Before this table, both forms called `setSent(true)` and threw the
+   * visitor's details away. The schedule-a-visit success state told a
+   * bereaved family "a care director will call within the working day"
+   * and nobody was ever told to call. This table is the missing half.
+   *
+   * One table, two `kind`s. The forms ask overlapping questions
+   * (name, how to reach you, timing, free-text notes) and the staff
+   * workflow is identical — someone reads it and rings back — so
+   * splitting them into two tables would duplicate the queue, the
+   * admin page, and the notification for no gain. Fields that apply
+   * to only one form are optional and documented below.
+   *
+   * WRITTEN BY AN UNAUTHENTICATED PUBLIC MUTATION. The visitor has no
+   * account; requiring one would defeat the form. Consequences that
+   * shape the design:
+   *
+   *   - `convex/enquiries.ts` rate-limits per normalised contact and
+   *     globally per window. Growth is bounded by policy, not trust.
+   *   - Every field is length-capped at write. A public writer must
+   *     never be able to choose how much storage it consumes.
+   *   - No field here is authoritative for anything. An enquiry is a
+   *     stranger's claim about themselves; it becomes a `customers`
+   *     row only when staff create one deliberately.
+   *
+   * PII: `name` and `contact` are personal data under the Data Privacy
+   * Act, submitted voluntarily by the person themselves. Retention is
+   * an open question for the cemetery — see the runbook. Staff status
+   * changes emit an audit row; the PII itself is redacted there by
+   * `emitAudit`, so the audit trail records that someone actioned
+   * enquiry X without re-copying the phone number into a second table.
+   *
+   * Field notes:
+   *   - `kind` — which form it came from.
+   *   - `contact` — free text. The visit form collects a phone; the
+   *     pricing form's field is labelled "phone or email". Stored as
+   *     typed rather than parsed, because a half-parsed phone number
+   *     is worse than the string the person actually wrote.
+   *   - `preferredDate` / `preferredTime` — visit form only. Date is
+   *     an ISO `YYYY-MM-DD` string from `<input type="date">`, kept as
+   *     a string because it is the visitor's stated preference in
+   *     their own local reckoning, not an instant.
+   *   - `purpose` — visit form: why they are coming.
+   *   - `lotTypeInterest` / `timing` — pricing form.
+   *   - `notes` — free text from either form.
+   *   - `status` — `new` → `contacted` → `closed`. Plain field, not a
+   *     state machine: there is no financial or legal consequence to
+   *     the transitions and ADR-0006's machinery would be ceremony.
+   *   - `handledBy` / `handledAt` — who actioned it, so an unanswered
+   *     enquiry has an owner.
+   *
+   * Indexes:
+   *   - `by_status_createdAt` — the staff queue, new first.
+   *   - `by_createdAt` — the full listing and the rate-limit window scan.
+   *   - `by_contactKey_createdAt` — per-contact rate limiting.
+   */
+  /**
+   * Payment-gateway credentials, settable by an admin in the UI.
+   *
+   * Why this table exists: the adapters in
+   * `convex/lib/paymentGateways/` already have live fetch paths, but
+   * they read `<GATEWAY>_API_BASE_URL` / `<GATEWAY>_API_KEY` from the
+   * process environment. Setting those means `npx convex env set` from
+   * a developer's terminal. The cemetery has no developer on staff, so
+   * go-live and every later key rotation would have required calling
+   * one. This table moves that to `/admin/settings/payment-gateways`.
+   *
+   * ## Secrets in the database — the trade-off, stated plainly
+   *
+   * An API key here is less protected than one in the Convex
+   * environment. It sits in the table, in every backup, and any query
+   * that reads the row can read it. That is a real reduction in
+   * defence, accepted for a specific reason: a cemetery that cannot
+   * rotate its own webhook secret will not rotate it at all, and a
+   * stale secret nobody can change is the worse exposure.
+   *
+   * The reduction is bounded by how the surface is built — the
+   * constraints below are load-bearing, not decoration:
+   *
+   *   1. **No secret ever leaves the server.** The admin read query
+   *      returns a masked preview (last 4 characters) and never the
+   *      value. Only internal, server-side resolvers read the real
+   *      thing, and their results go to `fetch` and HMAC verification,
+   *      never to a client.
+   *   2. **Admin only**, on both read and write.
+   *   3. **Every change is audited**, with the secret redacted — the
+   *      audit records that a key was rotated and by whom, never what
+   *      it was rotated to.
+   *   4. **Excluded from the archival export.** The BIR archive is a
+   *      financial record; shipping live credentials into a ten-year
+   *      S3 retention bucket would be indefensible.
+   *
+   * Environment variables still win when set. An operator who wants
+   * credentials kept out of the database entirely can set the env vars
+   * and this table is ignored — see `resolveGatewayCredentials`. That
+   * keeps the stricter posture available to anyone who wants it.
+   *
+   * Field notes:
+   *   - `gateway` — one row per gateway; the id is the natural key.
+   *   - `apiBaseUrl` — the gateway's API root. Its presence is what
+   *     switches the adapter off the mock page, so a blank value here
+   *     with no env fallback means "not configured".
+   *   - `apiKey` / `webhookSecret` — the secrets. Never returned to a
+   *     client.
+   *   - `isEnabled` — an off switch that does not require clearing the
+   *     credentials. Turning a gateway off mid-incident should not
+   *     mean retyping its key afterwards.
+   *   - `mode` — `sandbox` or `live`, recorded so the admin page can
+   *     state which one is in force. The adapter does not branch on
+   *     it; the base URL decides where requests go.
+   *
+   * Index: `by_gateway` — the resolver's single lookup.
+   */
+  paymentGatewayConfig: defineTable({
+    gateway: v.union(
+      v.literal("gcash"),
+      v.literal("maya"),
+      v.literal("card"),
+    ),
+    apiBaseUrl: v.string(),
+    apiKey: v.string(),
+    webhookSecret: v.string(),
+    isEnabled: v.boolean(),
+    mode: v.union(v.literal("sandbox"), v.literal("live")),
+    updatedAt: v.number(),
+    updatedBy: v.id("users"),
+  }).index("by_gateway", ["gateway"]),
+
+  enquiries: defineTable({
+    kind: v.union(v.literal("visit"), v.literal("pricing")),
+    name: v.string(),
+    contact: v.string(),
+    /**
+     * Normalised `contact` (lowercased, non-alphanumerics stripped)
+     * used solely as the rate-limit key. Stored rather than computed
+     * on read so the index can do the work.
+     */
+    contactKey: v.string(),
+    preferredDate: v.optional(v.string()),
+    preferredTime: v.optional(v.string()),
+    purpose: v.optional(v.string()),
+    lotTypeInterest: v.optional(v.string()),
+    timing: v.optional(v.string()),
+    notes: v.optional(v.string()),
+    status: v.union(
+      v.literal("new"),
+      v.literal("contacted"),
+      v.literal("closed"),
+    ),
+    createdAt: v.number(),
+    handledBy: v.optional(v.id("users")),
+    handledAt: v.optional(v.number()),
+    /** Set when the staff notification email could not be sent. */
+    notifyFailedAt: v.optional(v.number()),
+  })
+    .index("by_status_createdAt", ["status", "createdAt"])
+    .index("by_createdAt", ["createdAt"])
+    .index("by_contactKey_createdAt", ["contactKey", "createdAt"]),
+
   authAttempts: defineTable({
     identifier: v.string(),
     attemptedAt: v.number(),

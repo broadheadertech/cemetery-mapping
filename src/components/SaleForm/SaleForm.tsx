@@ -446,7 +446,7 @@ export function SaleForm({ userRoles = [], initialLotId }: SaleFormProps) {
       </div>
 
       {tab === "installment" && (
-        <InstallmentTermsPanel userRoles={userRoles} />
+        <InstallmentTermsPanel userRoles={userRoles} initialLotId={initialLotId} />
       )}
 
       {tab === "full" && (

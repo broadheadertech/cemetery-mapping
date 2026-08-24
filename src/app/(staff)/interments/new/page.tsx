@@ -24,8 +24,8 @@
  */
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery } from "convex/react";
 import { makeFunctionReference } from "convex/server";
 
@@ -104,9 +104,15 @@ const findConflictsRef = makeFunctionReference<
   IntermentConflictRow[]
 >("interments:findConflicts");
 
-export default function NewIntermentPage() {
+function NewIntermentContent() {
   const router = useRouter();
-  const [selectedLotId, setSelectedLotId] = useState<string>("");
+  // Deep-link: "Schedule interment" from a lot/map arrives as
+  // `/interments/new?lotId=…` and pre-selects that lot (it appears in the
+  // eligible list once the sold/occupied lots load).
+  const searchParams = useSearchParams();
+  const [selectedLotId, setSelectedLotId] = useState<string>(
+    () => searchParams.get("lotId") ?? "",
+  );
   const [submitError, setSubmitError] = useState<string | null>(null);
   // Story 7.2 wiring — the form notifies the parent of its composed
   // `scheduledAt` epoch ms (null while date or time is blank). We
@@ -286,5 +292,14 @@ export default function NewIntermentPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function NewIntermentPage() {
+  // `useSearchParams` requires a Suspense boundary (Next.js App Router).
+  return (
+    <Suspense fallback={null}>
+      <NewIntermentContent />
+    </Suspense>
   );
 }

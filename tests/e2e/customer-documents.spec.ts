@@ -19,7 +19,9 @@
  * Pattern matches `journey-3-field-worker-condition-log.spec.ts`.
  */
 
-import { test, expect, devices } from "@playwright/test";
+import { test, expect } from "@playwright/test";
+
+import { MOBILE_PROFILE } from "./helpers/mobile-profile";
 
 test.describe("customer-documents — unauthenticated route protection", () => {
   test("/customers/:id/upload redirects unauthenticated users to /login", async ({
@@ -31,7 +33,7 @@ test.describe("customer-documents — unauthenticated route protection", () => {
 });
 
 test.describe("customer-documents — mobile profile", () => {
-  test.use({ ...devices["Pixel 5"] });
+  test.use(MOBILE_PROFILE);
   test("mobile viewport reaches the same login redirect cleanly", async ({
     page,
   }) => {
