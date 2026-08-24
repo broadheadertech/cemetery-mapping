@@ -41,7 +41,6 @@ export interface PlanSection {
   w: number;
   h: number;
   label: string;
-  lots: number;
 }
 
 /** The plan, in an 800×500 coordinate space. */
@@ -49,20 +48,52 @@ export const PLAN_WIDTH = 800;
 export const PLAN_HEIGHT = 500;
 
 export const SECTIONS: ReadonlyArray<PlanSection> = [
-  { id: "A", x: 60, y: 80, w: 200, h: 140, label: "GARDEN OF GRACE", lots: 8 },
-  { id: "B", x: 280, y: 80, w: 240, h: 140, label: "GARDEN OF FAITH", lots: 10 },
-  { id: "C", x: 540, y: 80, w: 180, h: 140, label: "GARDEN OF HOPE", lots: 8 },
-  { id: "D", x: 60, y: 260, w: 220, h: 160, label: "COLUMBARIUM EAST", lots: 12 },
-  { id: "E", x: 300, y: 260, w: 240, h: 160, label: "GARDEN OF PEACE", lots: 10 },
-  { id: "F", x: 560, y: 260, w: 160, h: 160, label: "MAUSOLEUM ROW", lots: 6 },
+  { id: "A", x: 60, y: 80, w: 200, h: 140, label: "GARDEN OF GRACE" },
+  { id: "B", x: 280, y: 80, w: 240, h: 140, label: "GARDEN OF FAITH" },
+  { id: "C", x: 540, y: 80, w: 180, h: 140, label: "GARDEN OF HOPE" },
+  { id: "D", x: 60, y: 260, w: 220, h: 160, label: "COLUMBARIUM EAST" },
+  { id: "E", x: 300, y: 260, w: 240, h: 160, label: "GARDEN OF PEACE" },
+  { id: "F", x: 560, y: 260, w: 160, h: 160, label: "MAUSOLEUM ROW" },
 ];
 
-/** Lot grid geometry, shared so the two views space lots identically. */
-const COLUMNS = 4;
+/**
+ * Lot grid geometry, shared so the two views space lots identically.
+ *
+ * How many lots a garden holds is DERIVED from how much room it has,
+ * rather than declared. Each garden used to carry a hand-picked count
+ * of six to twelve, which filled the top two rows and left the rest of
+ * the plot empty. Flat on paper that passed for white space; standing
+ * up in the 3D view it read as an unfinished park — acres of blank
+ * slab with a handful of plots in one corner.
+ *
+ * A garden now holds what fits, which is also how a real plan works:
+ * the ground decides, not a number someone typed.
+ */
+const TARGET_CELL_WIDTH = 38;
 const ROW_HEIGHT = 16;
 const ROW_GAP = 4;
 const PAD_X = 10;
 const PAD_TOP = 18;
+const PAD_BOTTOM = 10;
+
+/** Columns and rows a garden's rectangle has room for. */
+export function gridOf(section: PlanSection): {
+  columns: number;
+  rows: number;
+} {
+  const usableWidth = section.w - PAD_X * 2;
+  const usableHeight = section.h - PAD_TOP - PAD_BOTTOM;
+  return {
+    columns: Math.max(2, Math.floor(usableWidth / TARGET_CELL_WIDTH)),
+    rows: Math.max(1, Math.floor(usableHeight / (ROW_HEIGHT + ROW_GAP))),
+  };
+}
+
+/** How many lots a garden holds. */
+export function lotCountOf(section: PlanSection): number {
+  const { columns, rows } = gridOf(section);
+  return columns * rows;
+}
 
 export interface PlanLot {
   /** Lot code, e.g. `B-104`. */
@@ -80,27 +111,38 @@ export interface PlanLot {
 }
 
 /**
- * Status for the nth lot of a section.
+ * Status for the lot at a given position in a garden.
  *
  * A fixed pattern rather than randomness: the page must look the same
- * on every visit and on every render, or the 2D and 3D views disagree
- * and server and client markup mismatch.
+ * on every visit and on every render, or the two views disagree and the
+ * server markup mismatches on hydration.
+ *
+ * Keyed on COLUMN AND ROW, not on the running index. Indexing by
+ * position alone means the pattern's period can line up with a garden's
+ * column count — `index % 5` in a five-column garden marks column zero
+ * of every row, and the 3D view renders that as a solid wall of
+ * headstones down one edge rather than a scatter of plots. Mixing
+ * column, row, and a per-garden seed breaks that alignment whatever
+ * width a garden happens to be.
  */
-function statusFor(index: number): LotStatus {
-  if (index % 5 === 0) return "occupied";
-  if (index % 7 === 0) return "reserved";
+function statusFor(sectionId: string, column: number, row: number): LotStatus {
+  const seed = sectionId.charCodeAt(0) - 65;
+  const n = (column * 5 + row * 3 + seed) % 13;
+  if (n === 2 || n === 9) return "occupied";
+  if (n === 6) return "reserved";
   return "available";
 }
 
 /** Every lot in a section, positioned in plan space. */
 export function lotsOf(section: PlanSection): PlanLot[] {
-  const cellWidth = (section.w - PAD_X * 2) / COLUMNS;
-  return Array.from({ length: section.lots }, (_, i) => {
-    const column = i % COLUMNS;
-    const row = Math.floor(i / COLUMNS);
+  const { columns } = gridOf(section);
+  const cellWidth = (section.w - PAD_X * 2) / columns;
+  return Array.from({ length: lotCountOf(section) }, (_, i) => {
+    const column = i % columns;
+    const row = Math.floor(i / columns);
     return {
       id: `${section.id}-${100 + i}`,
-      status: statusFor(i),
+      status: statusFor(section.id, column, row),
       sectionId: section.id,
       sectionLabel: section.label,
       x: section.x + PAD_X + column * cellWidth,
