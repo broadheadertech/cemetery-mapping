@@ -68,6 +68,8 @@ export async function signIn(page: Page, role: DemoRole): Promise<void> {
 export const test = base.extend<{ signInAs: (role: DemoRole) => Promise<void> }>(
   {
     signInAs: async ({ page }, use) => {
+      // `use` is Playwright's fixture callback, not React's `use` hook.
+      // eslint-disable-next-line react-hooks/rules-of-hooks
       await use((role: DemoRole) => signIn(page, role));
     },
   },
