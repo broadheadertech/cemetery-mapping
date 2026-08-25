@@ -116,6 +116,17 @@ interface FlaggedForFollowupResult {
   isPlaceholder: boolean;
 }
 
+/**
+ * The caller's own roles. Gated on `requireAuth` rather than a role,
+ * so every signed-in user may read it — which is what lets the page
+ * decide, before asking, which of the privileged panels to request.
+ */
+const getCurrentUserRolesRef = makeFunctionReference<
+  "query",
+  Record<string, never>,
+  { userId: string; roles: string[]; isActive: boolean }
+>("users:getCurrentUserRoles");
+
 const getDashboardKpisRef = makeFunctionReference<
   "query",
   { period: "mtd" | "ytd" },
@@ -212,21 +223,37 @@ export default function DashboardPage(): ReactElement {
   const period: "mtd" | "ytd" =
     searchParams.get("period") === "ytd" ? "ytd" : "mtd";
 
-  const kpis = useQuery(getDashboardKpisRef, { period });
-  const aging = useQuery(getArAgingSummaryRef, {});
-  const flagged = useQuery(getFlaggedForFollowupSummaryRef, {});
+  // Who is asking. A `requireAuth` self-read, so every signed-in user
+  // may call it.
+  const me = useQuery(getCurrentUserRolesRef, {});
+  const roles = me?.roles ?? [];
+  const canSeeMoney = roles.includes("admin");
+  const canSeeAging = canSeeMoney || roles.includes("office_staff");
 
-  // FORBIDDEN-aware fallback. The query throws when the caller is not
-  // admin; we treat that as "degraded view" rather than crashing. The
-  // `useQuery` hook surfaces an error via its error boundary contract;
-  // we wrap reads in try-catch-equivalent by checking whether the
-  // result is `undefined` (loading) vs. an error state, which Convex's
-  // React adapter throws to the nearest boundary. The simplest
-  // defensive pattern here: render based on what's present and let the
-  // Error Boundary in the layout catch unexpected errors.
-  const isKpiLoading = kpis === undefined;
-  const isAgingLoading = aging === undefined;
-  const isFlaggedLoading = flagged === undefined;
+  // `"skip"` for anyone who may not read these. Running them and
+  // treating the result as "degraded" does not work: `useQuery` throws
+  // a rejected query during render rather than returning `undefined`,
+  // so an office staffer or field worker opening the dashboard got an
+  // uncaught FORBIDDEN instead of a dashboard.
+  const kpis = useQuery(
+    getDashboardKpisRef,
+    canSeeMoney ? { period } : "skip",
+  );
+  const aging = useQuery(getArAgingSummaryRef, canSeeAging ? {} : "skip");
+  const flagged = useQuery(
+    getFlaggedForFollowupSummaryRef,
+    canSeeMoney ? {} : "skip",
+  );
+
+  // A skipped query stays `undefined` forever, so "loading" has to mean
+  // "permitted and still in flight" — otherwise the sections a role
+  // cannot see would sit on a skeleton that never resolves, which reads
+  // as broken rather than as restricted.
+  // Each panel below tests its own value directly rather than going
+  // through a derived `isLoading` flag. Two reasons: a skipped query
+  // stays `undefined` forever, so "undefined" alone no longer means
+  // "loading"; and `canSee… && x === undefined` does not narrow the
+  // union, so the loaded branch would not type-check.
 
   const periodLabel = useMemo(
     () => (period === "ytd" ? "vs. last year" : "vs. last month"),
@@ -287,7 +314,12 @@ export default function DashboardPage(): ReactElement {
         data-testid="dashboard-money-tiles"
         className="grid grid-cols-2 gap-3 md:grid-cols-3 md:gap-4 lg:grid-cols-5"
       >
-        {isKpiLoading ? (
+        {!canSeeMoney ? (
+          <RestrictedNotice
+            className="col-span-2 md:col-span-3 lg:col-span-5"
+            what="Financial figures"
+          />
+        ) : kpis === undefined ? (
           <>
             <SkeletonCard label="Sales" />
             <SkeletonCard label="Collections" />
@@ -362,7 +394,12 @@ export default function DashboardPage(): ReactElement {
         data-testid="dashboard-inventory-tiles"
         className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4"
       >
-        {isKpiLoading ? (
+        {!canSeeMoney ? (
+          <RestrictedNotice
+            className="col-span-2 md:col-span-4"
+            what="Inventory figures"
+          />
+        ) : kpis === undefined ? (
           <>
             <SkeletonCard label="Lots Available" />
             <SkeletonCard label="Lots Sold" />
@@ -420,7 +457,9 @@ export default function DashboardPage(): ReactElement {
             </span>
           )}
         </div>
-        {isAgingLoading ? (
+        {!canSeeAging ? (
+          <RestrictedNotice what="Receivables" />
+        ) : aging === undefined ? (
           <SkeletonBucketList />
         ) : (
           <ul className="divide-y divide-slate-100">
@@ -452,8 +491,10 @@ export default function DashboardPage(): ReactElement {
           onClick={() => router.push("/flagged-followups?status=open")}
           data-testid="dashboard-flagged-tile-button"
           aria-label={
-            isFlaggedLoading
-              ? "Flagged for follow-up: loading"
+            !canSeeMoney
+              ? "Flagged for follow-up: visible to administrators"
+              : flagged === undefined
+                ? "Flagged for follow-up: loading"
               : flagged.count === 0
                 ? "Flagged for follow-up: no open flags"
                 : `Flagged for follow-up: ${formatCount(flagged.count)} open${
@@ -467,7 +508,11 @@ export default function DashboardPage(): ReactElement {
           <h2 className="mb-2 text-sm font-semibold text-slate-900">
             Flagged for Follow-up
           </h2>
-          {isFlaggedLoading ? (
+          {!canSeeMoney ? (
+            <p className="text-sm text-text-muted">
+              Visible to administrators.
+            </p>
+          ) : flagged === undefined ? (
             <p className="text-sm text-slate-500">Loading…</p>
           ) : flagged.count === 0 ? (
             <ReactiveHighlight watch={flagged.count}>
@@ -619,6 +664,31 @@ function ArAgingRow({ bucket, onSelect }: ArAgingRowProps): ReactElement {
 
 interface SkeletonCardProps {
   label: string;
+}
+
+/**
+ * Shown in place of a panel the signed-in role may not read.
+ *
+ * Deliberately not a skeleton: a skeleton that never resolves reads as
+ * a broken page, and these panels are not slow — they are restricted.
+ * Field workers and office staff see the dashboard every day, and the
+ * financial tiles are simply not theirs.
+ */
+function RestrictedNotice({
+  what,
+  className,
+}: {
+  what: string;
+  className?: string;
+}): ReactElement {
+  return (
+    <div
+      data-testid="dashboard-restricted-notice"
+      className={`rounded-lg border border-dashed border-surface-border bg-surface-muted px-4 py-5 text-sm text-text-muted ${className ?? ""}`}
+    >
+      {what} are visible to administrators.
+    </div>
+  );
 }
 
 function SkeletonCard({ label }: SkeletonCardProps): ReactElement {

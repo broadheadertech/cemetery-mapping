@@ -81,7 +81,17 @@ const isStaffRoute = createRouteMatcher([
   "/phase-3d",
   "/phase-3d/(.*)",
 ]);
-const isAdminRoute = createRouteMatcher(["/admin", "/admin/(.*)"]);
+// `/reports` is admin-only in the sidebar but was never enforced, so a
+// non-admin who typed the URL reached a page whose queries are
+// `requireRole(["admin"])` — and a rejected `useQuery` throws during
+// render. Gating the route family here fixes the whole branch at once
+// rather than skip-gating each query on it.
+const isAdminRoute = createRouteMatcher([
+  "/admin",
+  "/admin/(.*)",
+  "/reports",
+  "/reports/(.*)",
+]);
 const isCustomerRoute = createRouteMatcher(["/portal", "/portal/(.*)"]);
 
 interface AuthUserDoc {

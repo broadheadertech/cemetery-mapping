@@ -114,10 +114,30 @@ function setUseQueryHandlers(opts: {
   kpis?: unknown;
   aging?: unknown;
   flagged?: unknown;
+  /**
+   * Roles of the signed-in caller. Defaults to admin because that is
+   * what most of these cases are about; pass something else to exercise
+   * the restricted panels.
+   *
+   * The page reads this before deciding which privileged queries to
+   * issue at all — it passes `"skip"` for the ones the role may not
+   * run, because a rejected `useQuery` throws during render rather than
+   * resolving to `undefined`.
+   */
+  roles?: string[];
 }) {
-  mockUseQuery.mockImplementation((ref: unknown) => {
+  mockUseQuery.mockImplementation((ref: unknown, args: unknown) => {
     const refRecord = ref as Record<symbol, unknown>;
     const name = String(refRecord?.[FUNCTION_NAME_SYMBOL] ?? "");
+    if (name.includes("getCurrentUserRoles")) {
+      return {
+        userId: "users:1",
+        roles: opts.roles ?? ["admin"],
+        isActive: true,
+      };
+    }
+    // Mirror Convex: a skipped query never resolves.
+    if (args === "skip") return undefined;
     if (name.includes("getDashboardKpis")) return opts.kpis;
     if (name.includes("getArAgingSummary")) return opts.aging;
     if (name.includes("getFlaggedForFollowupSummary"))
@@ -512,5 +532,85 @@ describe("DashboardPage — period announcement (AC4)", () => {
     expect(
       screen.getByText("Showing year-to-date"),
     ).toBeInTheDocument();
+  });
+});
+
+/**
+ * Regression — the dashboard used to crash for everyone who was not an
+ * admin.
+ *
+ * It called `dashboard:getDashboardKpis`,
+ * `dashboard:getFlaggedForFollowupSummary` and (via the reconciliation
+ * banner) `reconciliation:listOpenReconciliationFailures`, all gated on
+ * `requireRole(["admin"])`, and assumed a rejected query would arrive as
+ * `undefined`. It does not: `useQuery` throws during render. Office
+ * staff and field workers signing in got an uncaught FORBIDDEN instead
+ * of a dashboard.
+ */
+describe("DashboardPage — roles other than admin", () => {
+  beforeEach(() => {
+    mockGetSearchParam.mockReturnValue(null);
+  });
+
+  it("renders for office staff instead of throwing", () => {
+    setUseQueryHandlers({
+      roles: ["office_staff"],
+      aging: makeAgingResult(),
+    });
+    expect(() => render(<DashboardPage />)).not.toThrow();
+  });
+
+  it("renders for a field worker instead of throwing", () => {
+    setUseQueryHandlers({ roles: ["field_worker"] });
+    expect(() => render(<DashboardPage />)).not.toThrow();
+  });
+
+  it("never asks for admin-only data on behalf of office staff", () => {
+    // The proof that the fix is real: the privileged queries are
+    // skipped, so there is nothing for the server to reject.
+    setUseQueryHandlers({
+      roles: ["office_staff"],
+      aging: makeAgingResult(),
+    });
+    render(<DashboardPage />);
+
+    const FUNCTION_NAME = Symbol.for("functionName");
+    const asked = mockUseQuery.mock.calls
+      .filter(([, args]) => args !== "skip")
+      .map(([ref]) =>
+        String((ref as Record<symbol, unknown>)?.[FUNCTION_NAME] ?? ""),
+      );
+
+    expect(asked.some((n) => n.includes("getDashboardKpis"))).toBe(false);
+    expect(
+      asked.some((n) => n.includes("getFlaggedForFollowupSummary")),
+    ).toBe(false);
+    // Receivables ARE office staff's to see.
+    expect(asked.some((n) => n.includes("getArAgingSummary"))).toBe(true);
+  });
+
+  it("says the financial panels are restricted rather than showing a stuck skeleton", () => {
+    setUseQueryHandlers({
+      roles: ["office_staff"],
+      aging: makeAgingResult(),
+    });
+    render(<DashboardPage />);
+    // A skeleton that never resolves reads as a broken page; these
+    // panels are not slow, they are not this role's.
+    expect(
+      screen.queryAllByTestId("dashboard-skeleton-card"),
+    ).toHaveLength(0);
+    expect(
+      screen.getAllByTestId("dashboard-restricted-notice").length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("still shows receivables to office staff", () => {
+    setUseQueryHandlers({
+      roles: ["office_staff"],
+      aging: makeAgingResult(),
+    });
+    render(<DashboardPage />);
+    expect(screen.getByTestId("dashboard-ar-aging")).toBeInTheDocument();
   });
 });

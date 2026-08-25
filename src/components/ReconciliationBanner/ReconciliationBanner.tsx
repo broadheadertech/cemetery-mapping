@@ -21,13 +21,23 @@
  *     architecture's "design for reuse" principle.
  *
  * Auth posture:
- *   The underlying query is admin-only. On non-admin caller the
- *   query throws FORBIDDEN, which Convex's React adapter surfaces as
- *   `undefined` (loading) → error boundary. To avoid bubbling that
- *   into the dashboard error surface for office staff who can render
- *   the dashboard but not see this banner, we render `null` when the
- *   query result is `undefined` (loading) — the banner only ever
- *   ASSERTS itself; it never blocks the page on missing data.
+ *   `reconciliation:listOpenReconciliationFailures` is admin-only, and
+ *   the dashboard this banner sits on is not — office staff and field
+ *   workers open it every day.
+ *
+ *   An earlier version simply ran the query and treated `undefined` as
+ *   "loading or not permitted". That was wrong about how Convex
+ *   behaves: `useQuery` does not swallow a rejected query into
+ *   `undefined`, it THROWS during render. So every non-admin who
+ *   opened the dashboard in production got an uncaught
+ *   `FORBIDDEN` ConvexError instead of a dashboard.
+ *
+ *   The query is now gated on the caller's own roles, read through
+ *   `users:getCurrentUserRoles` — a `requireAuth` self-read that any
+ *   signed-in user may call. Non-admins pass `"skip"`, so the
+ *   subscription never opens and there is nothing to reject. This is
+ *   the same pattern the sidebar badge uses in
+ *   `src/components/Sidebar/nav-items.ts`.
  */
 
 import type { ReactElement } from "react";
@@ -50,14 +60,36 @@ const listOpenReconciliationFailuresRef = makeFunctionReference<
   ListOpenReconciliationFailuresResult
 >("reconciliation:listOpenReconciliationFailures");
 
+/**
+ * Self-read of the caller's own roles. Gated on `requireAuth`, not on a
+ * role, so it is safe for every signed-in user.
+ */
+const getCurrentUserRolesRef = makeFunctionReference<
+  "query",
+  Record<string, never>,
+  { userId: string; roles: string[]; isActive: boolean }
+>("users:getCurrentUserRoles");
+
 export function ReconciliationBanner(): ReactElement | null {
-  // `limit: 0` would still cost the same query work server-side
-  // (the filter + sort dominate), so we just pass `undefined` and let
-  // the server cap the row payload at its default of 50.
-  const failures = useQuery(listOpenReconciliationFailuresRef, {});
-  // Loading OR non-admin caller (Convex returns `undefined` while the
-  // first call is in flight; error states route to the nearest
-  // boundary). Render nothing so the page layout is unchanged.
+  const me = useQuery(getCurrentUserRolesRef, {});
+  const isAdmin = me?.roles.includes("admin") ?? false;
+
+  // `"skip"` keeps the hook call unconditional while leaving the
+  // subscription closed for anyone who may not read the register.
+  // Running it and hoping for `undefined` is what broke the dashboard
+  // for every non-admin — see this file's auth note.
+  //
+  // `limit` is left unset: the filter and sort dominate the server-side
+  // cost, so capping rows saves nothing, and the server already caps
+  // the payload at 50.
+  const failures = useQuery(
+    listOpenReconciliationFailuresRef,
+    isAdmin ? {} : "skip",
+  );
+
+  // Still resolving the caller, not permitted, or nothing open — the
+  // banner only ever asserts itself, it never blocks the page.
+  if (!isAdmin) return null;
   if (failures === undefined) return null;
   if (failures.count === 0) return null;
 

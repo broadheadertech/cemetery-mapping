@@ -30,7 +30,14 @@
  * the component is decoupled from the codegen
  * (`convex/_generated/api`) that hasn't been run yet in this repo.
  * The reference shape mirrors `convex/exports.ts`.
- */
+  *
+ * @admin-route-only — this sheet renders only on `/reports/sales`
+ * and `/reports/exports`, and `src/middleware.ts` gates the whole
+ * `/reports` family on the `admin` role. Its export queries are
+ * therefore never issued by a caller who would be refused. If it is
+ * ever reused on a page open to other roles, gate those queries on
+ * the caller's role with `"skip"` first.
+*/
 
 import { useCallback, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
