@@ -160,7 +160,55 @@ const PILL_TINT: Record<LotStatus, string> = {
   defaulted: "bg-status-defaulted-bg text-status-defaulted-text",
 };
 
-export default function Phase3DMap() {
+/**
+ * A garden to lay out in the parcel. The scene derives each one's world
+ * size from `cols` × `rows`; `w`, `d` and `cx` are computed during the
+ * build.
+ */
+export interface ParcelSection {
+  /** Single letter; prefixes the demo lot codes. */
+  id: string;
+  /** Short code used for per-section roll-ups. */
+  code: string;
+  name: string;
+  cols: number;
+  rows: number;
+  /** Turf tint for the section pad. */
+  tint: number;
+  mausoleum?: boolean;
+}
+
+/** Phase 1's Northwest Parcel — the staff survey's default subject. */
+const DEFAULT_SECTIONS: ReadonlyArray<ParcelSection> = [
+  { id: "A", code: "GRACE", name: "Garden of Grace", cols: 5, rows: 5, tint: 0x8fab7f },
+  { id: "B", code: "FAITH", name: "Garden of Faith", cols: 6, rows: 5, tint: 0x86a276, mausoleum: true },
+  { id: "C", code: "HOPE", name: "Garden of Hope", cols: 5, rows: 5, tint: 0x93ad84 },
+];
+
+export interface Phase3DMapProps {
+  /**
+   * `staff` (default) is the survey tool: it reads live inventory and
+   * links into the sale and lot records.
+   *
+   * `public` is the same scene and the same controls on the marketing
+   * site. It reads no inventory — there is no session on a public page,
+   * and `lots:listLots` is role-gated — so it draws the illustrative
+   * parcel, and it offers an enquiry instead of staff actions.
+   */
+  variant?: "staff" | "public";
+  /** Gardens to lay out. Defaults to Phase 1's three. */
+  sections?: ReadonlyArray<ParcelSection>;
+  /** Heading for the roll-up beneath the lot detail. */
+  parcelLabel?: string;
+}
+
+export default function Phase3DMap({
+  variant = "staff",
+  sections: sectionsProp,
+  parcelLabel = "Phase 1 · Northwest Parcel",
+}: Phase3DMapProps = {}) {
+  const isPublic = variant === "public";
+  const parcelSections = sectionsProp ?? DEFAULT_SECTIONS;
   const stageRef = useRef<HTMLDivElement | null>(null);
   const apiRef = useRef<MapApi | null>(null);
 
@@ -178,12 +226,18 @@ export default function Phase3DMap() {
   // Live inventory for Phase 1's gardens. While the query is loading we
   // hold the scene back; once it resolves we build from real lots, or
   // fall back to the procedural demo when no Phase 1 lots exist yet.
-  const lotsQuery = useQuery(listLotsRef, {});
+  // `"skip"` keeps the hook call unconditional while leaving the
+  // subscription dormant — the public site has no session, and this
+  // query is role-gated, so running it would only ever throw.
+  const lotsQuery = useQuery(listLotsRef, isPublic ? "skip" : {});
   const realLots = useMemo<RealLotRow[] | null>(() => {
+    // Empty, not null: null means "still loading" and holds the scene
+    // back. The public view has nothing to wait for.
+    if (isPublic) return [];
     if (lotsQuery === undefined) return null;
     const names = new Set(PHASE1_SECTION_NAMES);
     return lotsQuery.filter((l) => !l.isRetired && names.has(l.section));
-  }, [lotsQuery]);
+  }, [isPublic, lotsQuery]);
   // Rebuild the scene only when the meaningful lot set changes (ids +
   // statuses), not on every query echo.
   const sceneSignature = useMemo(() => {
@@ -196,6 +250,13 @@ export default function Phase3DMap() {
   }, [realLots]);
   const realDataRef = useRef<RealLotRow[] | null>(realLots);
   realDataRef.current = realLots;
+  const sectionsRef = useRef<ReadonlyArray<ParcelSection>>(parcelSections);
+  sectionsRef.current = parcelSections;
+  // A different parcel is a different scene, so fold it into the
+  // rebuild key alongside the lot set.
+  const sectionSignature = parcelSections
+    .map((x) => `${x.id}:${x.cols}x${x.rows}`)
+    .join("|");
 
   // ---- Build the scene when live data resolves (rebuild on change). ----
   useEffect(() => {
@@ -213,6 +274,10 @@ export default function Phase3DMap() {
     scene.fog = new THREE.Fog(0xf6f2ea, 110, 240);
 
     const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 600);
+    // Provisional framing; replaced once the parcel's real width is
+    // known, below. A three-garden parcel and a six-garden one need
+    // very different distances, and the staff view's fixed 40/56 put
+    // half of a six-garden park outside the frame.
     const CAM0 = new THREE.Vector3(0, 40, 56);
     camera.position.copy(CAM0);
 
@@ -313,11 +378,12 @@ export default function Phase3DMap() {
       d: number;
       cx: number;
     }
-    const SECTIONS: SectionDef[] = [
-      { id: "A", code: "GRACE", name: "Garden of Grace", cols: 5, rows: 5, tint: 0x8fab7f, w: 0, d: 0, cx: 0 },
-      { id: "B", code: "FAITH", name: "Garden of Faith", cols: 6, rows: 5, tint: 0x86a276, mausoleum: true, w: 0, d: 0, cx: 0 },
-      { id: "C", code: "HOPE", name: "Garden of Hope", cols: 5, rows: 5, tint: 0x93ad84, w: 0, d: 0, cx: 0 },
-    ];
+    const SECTIONS: SectionDef[] = sectionsRef.current.map((s) => ({
+      ...s,
+      w: 0,
+      d: 0,
+      cx: 0,
+    }));
     const cellW = 3.0;
     const cellD = 3.6;
     const avenue = 6;
@@ -333,6 +399,19 @@ export default function Phase3DMap() {
       s.cx = cursorX + s.w / 2;
       cursorX += s.w + avenue;
     });
+
+    // Frame the whole parcel, whatever its width. Derived rather
+    // than fixed so adding gardens does not crop the view.
+    {
+      const span = Math.max(totalW, 40);
+      const dist = span * 0.92;
+      CAM0.set(0, dist * 0.62, dist * 0.86);
+      camera.position.copy(CAM0);
+      controls.maxDistance = Math.max(110, dist * 1.9);
+      camera.far = Math.max(600, dist * 6);
+      camera.updateProjectionMatrix();
+      scene.fog = new THREE.Fog(0xf6f2ea, dist * 1.5, dist * 3.6);
+    }
 
     const lots: THREE.Group[] = [];
     const labelEls: { el: HTMLDivElement; sec: SectionDef }[] = [];
@@ -832,7 +911,7 @@ export default function Phase3DMap() {
       }
       apiRef.current = null;
     };
-  }, [sceneSignature]);
+  }, [sceneSignature, sectionSignature]);
 
   // Bridge filter state → scene. Also re-applied after a rebuild
   // (sceneSignature change) so the active filter survives a data refresh.
@@ -879,7 +958,7 @@ export default function Phase3DMap() {
     <div className="grid grid-cols-1 overflow-hidden rounded-lg border border-surface-border bg-surface-base shadow-[var(--shadow-card)] lg:grid-cols-[1fr_360px]">
       {/* Stage */}
       <div className="relative h-[60vh] min-h-[460px] bg-surface-emphasis lg:h-[70vh]">
-        <div ref={stageRef} className="absolute inset-0" />
+        <div ref={stageRef} className="absolute inset-0 overflow-hidden" />
 
         {/* Filter toolbar */}
         <div className="absolute left-4 top-4 flex max-w-[560px] flex-wrap gap-1.5 rounded-lg border border-surface-border bg-surface-base/95 p-1.5 shadow-[var(--shadow-card)] backdrop-blur">
@@ -903,6 +982,7 @@ export default function Phase3DMap() {
 
         {/* View controls + phase switcher */}
         <div className="absolute right-4 top-4 flex items-center gap-2">
+          {!isPublic && (
           <div className="flex overflow-hidden rounded-md border border-surface-border bg-surface-base/95 shadow-[var(--shadow-card)]">
             {[1, 2, 3].map((n) => (
               <button
@@ -920,6 +1000,7 @@ export default function Phase3DMap() {
               </button>
             ))}
           </div>
+          )}
           <button
             type="button"
             onClick={() => setAutoRotate((v) => !v)}
@@ -977,7 +1058,7 @@ export default function Phase3DMap() {
 
       {/* Rail */}
       <aside className="overflow-y-auto border-t border-surface-border p-6 lg:border-l lg:border-t-0">
-        {isDemo && (
+        {isDemo && !isPublic && (
           <div className="mb-4 rounded-md border border-status-reserved-border/40 bg-status-reserved-bg px-3 py-2 text-[11px] leading-snug text-status-reserved-text">
             <strong className="font-semibold">Demonstration layout.</strong> No
             Phase&nbsp;1 lots are loaded yet — this is illustrative. Create lots
@@ -1024,24 +1105,45 @@ export default function Phase3DMap() {
             )}
 
             <div className="mt-5 space-y-2.5">
-              {selected.status === "available" && (
-                <Link
-                  href={
-                    selected.realLotId
-                      ? `/sales/new?lotId=${encodeURIComponent(selected.realLotId)}`
-                      : "/sales/new"
-                  }
-                  className={`${btnPrimary} w-full justify-center`}
-                >
-                  Start a sale
-                </Link>
+              {isPublic ? (
+                <>
+                  {selected.status === "available" && (
+                    <Link
+                      href="/contact"
+                      className={`${btnPrimary} w-full justify-center`}
+                    >
+                      Enquire about this lot
+                    </Link>
+                  )}
+                  <Link
+                    href="/pricing"
+                    className={`${btnOutline} w-full justify-center`}
+                  >
+                    See pricing
+                  </Link>
+                </>
+              ) : (
+                <>
+                  {selected.status === "available" && (
+                    <Link
+                      href={
+                        selected.realLotId
+                          ? `/sales/new?lotId=${encodeURIComponent(selected.realLotId)}`
+                          : "/sales/new"
+                      }
+                      className={`${btnPrimary} w-full justify-center`}
+                    >
+                      Start a sale
+                    </Link>
+                  )}
+                  <Link
+                    href={selected.realLotId ? `/lots/${selected.realLotId}` : "/lots"}
+                    className={`${btnOutline} w-full justify-center`}
+                  >
+                    Open full record
+                  </Link>
+                </>
               )}
-              <Link
-                href={selected.realLotId ? `/lots/${selected.realLotId}` : "/lots"}
-                className={`${btnOutline} w-full justify-center`}
-              >
-                Open full record
-              </Link>
             </div>
           </>
         ) : (
@@ -1053,10 +1155,10 @@ export default function Phase3DMap() {
         {/* Phase roll-up */}
         <div className="mt-7 border-t border-surface-emphasis pt-4.5">
           <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-text-muted">
-            Development phase
+            {isPublic ? "The grounds" : "Development phase"}
           </div>
           <div className="mt-1.5 font-display text-2xl font-semibold text-text-default">
-            Phase 1 · Northwest Parcel
+            {parcelLabel}
           </div>
           <div className="mt-3.5 flex border-y border-surface-emphasis">
             <Stat value={rollup ? String(rollup.total) : "—"} label="Lots" />
@@ -1065,7 +1167,7 @@ export default function Phase3DMap() {
               value={rollup ? `${rollup.occupiedPercent}%` : "—"}
               label="Occupied"
             />
-            <Stat value="3" label="Sections" last />
+            <Stat value={String(parcelSections.length)} label="Sections" last />
           </div>
           <div className="mt-4 flex flex-col gap-0.5">
             {rollup?.sections.map((s, i) => (

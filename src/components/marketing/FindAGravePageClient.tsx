@@ -9,27 +9,71 @@ import {
   type CemeterySectionPick,
 } from "./CemeteryMapSVG";
 import { MapLegend } from "./MapLegend";
+import { gridOf, SECTIONS } from "./cemetery-model";
 import { cn } from "@/lib/cn";
 
 /**
- * Three.js is far too heavy for a marketing page's first load, so the
- * 3D view is fetched only when a visitor asks for it. `ssr: false`
- * because WebGL is browser-only.
+ * The 3D view is the SAME component the staff survey at `/phase-3d`
+ * uses, in its public variant — same scene, same controls, same detail
+ * rail. An earlier attempt drew a separate, simpler scene here, and the
+ * two surfaces looked nothing alike; sharing the component is the only
+ * thing that actually keeps them the same.
+ *
+ * Three.js is far too heavy for a marketing page's first load, so it is
+ * fetched only when a visitor asks for 3D. `ssr: false` because WebGL
+ * is browser-only.
  */
-const CemeteryMap3D = dynamic(
-  () => import("./CemeteryMap3D").then((m) => m.CemeteryMap3D),
+const Phase3DMap = dynamic(
+  () => import("@/components/Phase3DMap").then((m) => m.Phase3DMap),
   {
-    ssr: false,
-    loading: () => (
-      <div
-        role="status"
-        className="flex h-[24rem] items-center justify-center rounded bg-surface-emphasis text-sm text-text-muted sm:h-[30rem]"
-      >
-        Preparing the 3D view&hellip;
-      </div>
-    ),
+  ssr: false,
+  loading: () => (
+    <div
+      role="status"
+      className="flex h-[60vh] min-h-[460px] items-center justify-center rounded-lg bg-surface-emphasis text-sm text-text-muted"
+    >
+      Preparing the 3D view&hellip;
+    </div>
+  ),
   },
 );
+
+/**
+ * The park's six gardens, described for the 3D scene. Grid shape comes
+ * from the same plan the flat map draws, so both views show the same
+ * gardens at the same relative sizes.
+ */
+/** Small words stay lowercase — "Garden of Faith", not "Garden Of Faith". */
+const MINOR_WORDS = new Set(["of", "the", "and"]);
+
+function titleCase(label: string): string {
+  return label
+    .toLowerCase()
+    .split(" ")
+    .map((word, i) =>
+      i > 0 && MINOR_WORDS.has(word)
+        ? word
+        : word.charAt(0).toUpperCase() + word.slice(1),
+    )
+    .join(" ");
+}
+
+const PARK_SECTIONS = SECTIONS.map((section, i) => {
+  const { columns, rows } = gridOf(section);
+  return {
+    id: section.id,
+    code: section.label.replace(/^(GARDEN OF |COLUMBARIUM |MAUSOLEUM )/, ""),
+    // The plan stores labels in caps, which suits the flat map's
+    // small type. The 3D scene sets them in the display serif, where
+    // caps read as shouting — so title-case them for that view.
+    name: titleCase(section.label),
+    cols: columns,
+    rows,
+    // Gentle turf variation so neighbouring gardens read apart.
+    tint: [0x8fab7f, 0x86a276, 0x93ad84, 0x8aa87c, 0x8fae82, 0x849f77][i % 6]!,
+    mausoleum: section.label.includes("MAUSOLEUM"),
+  };
+});
 
 type ViewMode = "plan" | "three";
 
@@ -69,9 +113,9 @@ export function FindAGravePageClient() {
 
   return (
     <section className="bg-surface-emphasis">
-      <div className="mx-auto grid max-w-7xl grid-cols-1 gap-8 px-4 py-12 sm:px-6 lg:grid-cols-[1.6fr_1fr] lg:px-8">
-        <div className="rounded border border-surface-border bg-surface-base p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+          {view === "plan" ? (
           <div
             role="group"
             aria-label="Filter lots by status"
@@ -97,6 +141,11 @@ export function FindAGravePageClient() {
               );
             })}
           </div>
+          ) : (
+            <p className="text-sm text-text-muted">
+              Drag to turn the park. Click any plot to see it.
+            </p>
+          )}
 
           <div
             role="group"
@@ -128,23 +177,24 @@ export function FindAGravePageClient() {
               );
             })}
           </div>
-          </div>
+        </div>
 
-          <div className="mt-5">
-            {view === "plan" ? (
-              <CemeteryMapSVG
-                interactive
-                onSelect={setSelected}
-                selectedId={selected.id}
-              />
-            ) : (
-              <CemeteryMap3D
-                onSelect={setSelected}
-                selectedId={selected.id}
-                filter={filter}
-              />
-            )}
-          </div>
+        {view === "three" ? (
+          // The 3D view brings its own filters, legend and lot rail,
+          // so it takes the full width and the page steps back.
+          <Phase3DMap
+            variant="public"
+            sections={PARK_SECTIONS}
+            parcelLabel="Apostle Paul Memorial Park"
+          />
+        ) : (
+        <div className="grid grid-cols-1 gap-8 lg:grid-cols-[1.6fr_1fr]">
+        <div className="rounded border border-surface-border bg-surface-base p-5">
+          <CemeteryMapSVG
+            interactive
+            onSelect={setSelected}
+            selectedId={selected.id}
+          />
           <div className="mt-5 border-t border-surface-border pt-4">
             <MapLegend />
           </div>
@@ -257,6 +307,8 @@ export function FindAGravePageClient() {
             </div>
           ) : null}
         </aside>
+        </div>
+        )}
       </div>
     </section>
   );

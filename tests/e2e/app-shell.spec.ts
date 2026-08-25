@@ -28,8 +28,22 @@ test.describe("app shell — middleware contracts", () => {
     await expect(page).toHaveURL(/\/login(\?|$)/);
   });
 
-  test("unauthenticated / → /login", async ({ page }) => {
+  test("unauthenticated / serves the public site, not a redirect", async ({
+    page,
+  }) => {
+    // This asserted `/` → `/login` when the app was auth-walled end to
+    // end. The marketing site now owns the root, so a redirect here
+    // would mean the public pages had become unreachable.
     await page.goto("/");
+    await expect(page).toHaveURL(/localhost:3000\/?$/);
+    // The page's own h1 — the nav collapses into a hamburger on the
+    // mobile profile, so anything in it is the wrong thing to assert on.
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  });
+
+  test("the staff area still redirects when signed out", async ({ page }) => {
+    // The contract the root used to carry, asserted where it now lives.
+    await page.goto("/dashboard");
     await expect(page).toHaveURL(/\/login(\?|$)/);
   });
 
