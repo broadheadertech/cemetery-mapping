@@ -5,6 +5,7 @@ import { fetchQuery } from "convex/nextjs";
 import { makeFunctionReference } from "convex/server";
 import { convexAuthNextjsToken } from "@convex-dev/auth/nextjs/server";
 
+import { SessionGuard } from "@/components/SessionGuard";
 import { CustomerPortalSignOut } from "@/components/CustomerPortal/CustomerPortalSignOut";
 
 /**
@@ -135,7 +136,10 @@ export default async function CustomerLayout({
         </div>
       </header>
       <main className="mx-auto max-w-3xl px-4 py-6 sm:px-6 sm:py-8">
-        {children}
+        {/* Owner sessions last 30 days, but they do end — and when they
+            do, every portal query throws during render. Send the family
+            to the sign-in form rather than a crash screen. */}
+        <SessionGuard signInPath="/portal/login">{children}</SessionGuard>
       </main>
     </div>
   );

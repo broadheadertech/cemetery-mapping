@@ -3,6 +3,7 @@ import { fetchQuery } from "convex/nextjs";
 import { makeFunctionReference } from "convex/server";
 import { convexAuthNextjsToken } from "@convex-dev/auth/nextjs/server";
 import { AppShell } from "@/components/AppShell";
+import { SessionGuard } from "@/components/SessionGuard";
 
 /**
  * Staff route group layout.
@@ -72,5 +73,13 @@ export default async function StaffLayout({
     roles: payload.roles,
   };
 
-  return <AppShell user={user}>{children}</AppShell>;
+  // Sessions expire on age, and every query then throws SESSION_EXPIRED
+  // during render. Without this the person sees React's crash screen
+  // for the ordinary act of leaving a tab open; with it they are signed
+  // out cleanly and sent to the form.
+  return (
+    <SessionGuard signInPath="/login">
+      <AppShell user={user}>{children}</AppShell>
+    </SessionGuard>
+  );
 }

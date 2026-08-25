@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, FormEvent, useId } from "react";
+import { useState, FormEvent, useId, Suspense } from "react";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuthActions } from "@convex-dev/auth/react";
 
 /**
@@ -30,6 +30,32 @@ import { useAuthActions } from "@convex-dev/auth/react";
  *   - Focus auto-lands on email field.
  *   - aria-describedby links error to inputs for screen readers.
  */
+/**
+ * Explains an involuntary arrival.
+ *
+ * `SessionGuard` sends people here with `?reason=expired` after their
+ * session ages out. Landing on a bare sign-in form with no explanation
+ * reads as "the app logged me out for no reason"; one line turns it
+ * into something that makes sense.
+ *
+ * `useSearchParams` needs a Suspense boundary in the App Router, which
+ * is why this is its own component rather than inline.
+ */
+function SignedOutNotice() {
+  const params = useSearchParams();
+  if (params.get("reason") !== "expired") return null;
+  return (
+    <div
+      role="status"
+      data-testid="login-expired-notice"
+      className="mt-4 rounded border-l-2 border-accent-gold bg-surface-muted px-4 py-3 text-sm text-text-default"
+    >
+      Your session ended, so we signed you out. Sign in to pick up where
+      you left off.
+    </div>
+  );
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const { signIn } = useAuthActions();
@@ -107,6 +133,10 @@ export default function LoginPage() {
       <p className="mt-1 text-sm text-text-muted">
         Estate office — internal staff system
       </p>
+
+      <Suspense fallback={null}>
+        <SignedOutNotice />
+      </Suspense>
 
       <form
         onSubmit={handleSubmit}

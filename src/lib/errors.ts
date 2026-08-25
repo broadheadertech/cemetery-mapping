@@ -149,7 +149,12 @@ const FALLBACK: TranslatedError = {
  * (modern Convex client surfaces it), then fall back to a regex on
  * the message.
  */
-function extractCode(error: unknown): string | null {
+/**
+ * Exported for `SessionGuard`, which has to recognise an expired or
+ * missing session from inside an error boundary — where the thrown
+ * value is all it has to work with.
+ */
+export function extractErrorCode(error: unknown): string | null {
   if (!error) return null;
 
   // Convex `ConvexError` instances expose `.data` with the original
@@ -187,7 +192,7 @@ function extractCode(error: unknown): string | null {
  * cover every defined code.
  */
 export function translateError(error: unknown): TranslatedError {
-  const code = extractCode(error);
+  const code = extractErrorCode(error);
   if (code && code in MESSAGES) {
     return MESSAGES[code as ClientErrorCode];
   }
