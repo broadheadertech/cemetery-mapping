@@ -58,7 +58,7 @@ import {
   makeFunctionReference,
 } from "convex/server";
 import { v } from "convex/values";
-import PDFKitDocument from "pdfkit";
+import PDFKitDocument from "../lib/pdfDocument";
 
 import schema from "../schema";
 import { BRAND, drawMark } from "../lib/brandAssets";

@@ -53,7 +53,7 @@
 import type { GenericActionCtx } from "convex/server";
 import { actionGeneric, makeFunctionReference } from "convex/server";
 import { v } from "convex/values";
-import PDFDocument from "pdfkit";
+import PDFDocument from "../lib/pdfDocument";
 
 import schema from "../schema";
 import type { DataModelFromSchemaDefinition } from "convex/server";

@@ -74,6 +74,7 @@ import type * as lib_paymentGateways_gcashAdapter from "../lib/paymentGateways/g
 import type * as lib_paymentGateways_index from "../lib/paymentGateways/index.js";
 import type * as lib_paymentGateways_mayaAdapter from "../lib/paymentGateways/mayaAdapter.js";
 import type * as lib_paymentGateways_types from "../lib/paymentGateways/types.js";
+import type * as lib_pdfDocument from "../lib/pdfDocument.js";
 import type * as lib_perpetualCare from "../lib/perpetualCare.js";
 import type * as lib_piiAccess from "../lib/piiAccess.js";
 import type * as lib_postFinancialEvent from "../lib/postFinancialEvent.js";
@@ -182,6 +183,7 @@ declare const fullApi: ApiFromModules<{
   "lib/paymentGateways/index": typeof lib_paymentGateways_index;
   "lib/paymentGateways/mayaAdapter": typeof lib_paymentGateways_mayaAdapter;
   "lib/paymentGateways/types": typeof lib_paymentGateways_types;
+  "lib/pdfDocument": typeof lib_pdfDocument;
   "lib/perpetualCare": typeof lib_perpetualCare;
   "lib/piiAccess": typeof lib_piiAccess;
   "lib/postFinancialEvent": typeof lib_postFinancialEvent;
