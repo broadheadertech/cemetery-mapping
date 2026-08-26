@@ -86,6 +86,13 @@ export default function IntermentsListPage() {
             Calendar view
           </Link>
           <Link
+            href="/interments/quick"
+            data-testid="interments-quick-link"
+            className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Family at the desk
+          </Link>
+          <Link
             href="/interments/new"
             className="rounded-md bg-[#1D5C4D] px-4 py-2 text-sm font-medium text-white hover:bg-[#144437]"
           >

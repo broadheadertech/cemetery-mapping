@@ -960,6 +960,17 @@ export default defineSchema({
       v.union(v.literal("body"), v.literal("bones")),
     ),
     dateOfInterment: v.optional(v.number()),
+    /**
+     * When the person died — a different fact from when they are
+     * buried, and the one the family arrives holding.
+     *
+     * It comes off the death certificate, it is what the office is told
+     * first at the desk, and it is what the burial date has to be at or
+     * after. Optional because it is unknown for most legacy records and
+     * for a set of transferred bones, and because a record that omits it
+     * is still a true record.
+     */
+    dateOfDeath: v.optional(v.number()),
     relationshipToOwner: v.string(),
     notes: v.optional(v.string()),
     createdAt: v.number(),

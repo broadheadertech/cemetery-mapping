@@ -61,6 +61,19 @@ const suggestRef = makeFunctionReference<"query", SuggestArgs, SuggestResult>(
   "lotSuggestions:suggestLotsForFamily",
 );
 
+/**
+ * The caller's own roles — a `requireAuth` self-read every signed-in
+ * user may run. `suggestLotsForFamily` is office-only, and `useQuery`
+ * THROWS a rejected query during render rather than returning
+ * `undefined`, so a field worker who reached this page and pressed the
+ * button got a crash screen instead of an answer.
+ */
+const rolesRef = makeFunctionReference<
+  "query",
+  Record<string, never>,
+  { userId: string; roles: string[]; isActive: boolean }
+>("users:getCurrentUserRoles");
+
 const LOT_TYPES = ["single", "family", "mausoleum", "niche"] as const;
 
 export default function SuggestLotPage(): ReactElement {
@@ -72,11 +85,19 @@ export default function SuggestLotPage(): ReactElement {
   const [nearCode, setNearCode] = useState("");
   const [submitted, setSubmitted] = useState<SuggestArgs | null>(null);
 
+  const me = useQuery(rolesRef, {});
+  const roles = me?.roles ?? [];
+  const mayUse = roles.includes("admin") || roles.includes("office_staff");
+
   // The query runs only once the staffer asks — the form is filled in
   // while a family talks, and re-querying on every keystroke would put
-  // a moving list in front of them.
-  const result = useQuery(suggestRef, submitted ?? "skip");
-  const loading = submitted !== null && result === undefined;
+  // a moving list in front of them. And only for a role that may run
+  // it: a rejected query is a crash, not an empty result.
+  const result = useQuery(
+    suggestRef,
+    mayUse && submitted !== null ? submitted : "skip",
+  );
+  const loading = mayUse && submitted !== null && result === undefined;
 
   const args = useMemo((): SuggestArgs => {
     const out: SuggestArgs = { limit: 5 };
@@ -93,6 +114,23 @@ export default function SuggestLotPage(): ReactElement {
     if (nearCode.trim().length > 0) out.nearLotCode = nearCode.trim();
     return out;
   }, [budget, bodies, bones, type, section, nearCode]);
+
+  if (me !== undefined && !mayUse) {
+    return (
+      <div className="space-y-4">
+        <h1 className="font-display text-4xl font-semibold tracking-tight">
+          Help a family choose
+        </h1>
+        <p
+          data-testid="suggest-not-permitted"
+          className="max-w-xl rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+        >
+          Lot pricing and availability are an office matter, so this
+          helper is limited to office staff and administrators.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

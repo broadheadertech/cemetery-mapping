@@ -47,7 +47,12 @@ import {
 import { v } from "convex/values";
 
 import schema from "./schema";
-import { requireRole, type MutationCtx, type QueryCtx } from "./lib/auth";
+import {
+  requireRole,
+  type AuthPayload,
+  type MutationCtx,
+  type QueryCtx,
+} from "./lib/auth";
 import { emitAudit } from "./lib/audit";
 import { ErrorCode, throwError } from "./lib/errors";
 import { checkIntermentEligibility } from "./lib/intermentEligibility";
@@ -267,6 +272,275 @@ async function sumPaidForContract(
   return installments.reduce((total, i) => total + i.paidCents, 0);
 }
 
+/**
+ * Everything `scheduleInterment` does except authenticate the caller.
+ *
+ * Split out so the quick-response desk flow can book an interment in
+ * the same transaction that creates the occupant, without restating any
+ * of the guards below. Each of them — the lot state machine, the
+ * payment threshold, the occupant/lot invariant, the double-booking
+ * scans across BOTH `interments` and `ceremonies` — was written in
+ * response to a specific way this can go wrong at a graveside. A second
+ * copy would drift from this one, and the copy that drifts is the one
+ * that books two families into the same hole.
+ *
+ * Callers must have authenticated the user themselves and pass the
+ * payload; it is used for attribution only, never for authorisation.
+ */
+export async function createScheduledInterment(
+  ctx: MutationCtx,
+  auth: AuthPayload,
+  args: {
+    lotId: LotId;
+    occupantId: OccupantId;
+    scheduledAt: number;
+    notes?: string;
+  },
+): Promise<{ intermentId: IntermentId }> {
+  // Argument validation — defense in depth (client also Zod-validates).
+  if (
+    !Number.isFinite(args.scheduledAt) ||
+    !Number.isInteger(args.scheduledAt) ||
+    args.scheduledAt <= 0
+  ) {
+    throwError(
+      ErrorCode.VALIDATION,
+      "scheduledAt must be a positive integer (unix ms).",
+    );
+  }
+
+  const now = Date.now();
+  if (args.scheduledAt < now - INTERMENT_BACKFILL_TOLERANCE_MS) {
+    throwError(
+      ErrorCode.VALIDATION,
+      "Cannot schedule interments more than 1 day in the past.",
+    );
+  }
+
+  const trimmedNotes = args.notes !== undefined ? args.notes.trim() : undefined;
+  if (
+    trimmedNotes !== undefined &&
+    trimmedNotes.length > INTERMENT_NOTES_MAX_LENGTH
+  ) {
+    throwError(
+      ErrorCode.VALIDATION,
+      `Notes must be ${INTERMENT_NOTES_MAX_LENGTH} characters or fewer.`,
+    );
+  }
+
+  // Lot existence + retire guard. Retired lots cannot host new
+  // interments (matches `occupants.addOccupant` precedent).
+  const lot = await ctx.db.get(args.lotId);
+  if (lot === null) {
+    throwError(ErrorCode.NOT_FOUND, "Lot not found.", {
+      lotId: args.lotId,
+    });
+  }
+  if (lot.isRetired) {
+    throwError(
+      ErrorCode.INVARIANT_VIOLATION,
+      "Cannot schedule an interment on a retired lot.",
+      { lotId: args.lotId },
+    );
+  }
+  // Epic 7 H2 — the lot must be `sold` or `occupied`. `completeInterment`
+  // transitions the lot to `occupied`, and the lot state machine only
+  // allows `sold → occupied` (or an already-`occupied` family-plot lot
+  // taking another interment). Scheduling against an `available` /
+  // `reserved` / `defaulted` / `cancelled` / `transferred` lot creates
+  // an interment that can NEVER be completed (the completion transition
+  // would throw ILLEGAL_STATE_TRANSITION). Reject it at scheduling time
+  // — server-side, not just in the booking-form UI.
+  if (lot.status !== "sold" && lot.status !== "occupied") {
+    throwError(
+      ErrorCode.INVARIANT_VIOLATION,
+      "Interments can only be scheduled on a sold or occupied lot.",
+      { lotId: args.lotId, lotStatus: lot.status },
+    );
+  }
+
+  // Payment. A lot turns `sold` the moment a contract exists, so the
+  // status check above passes for an installment contract carrying
+  // only a down payment — a family could be interred with fifty-nine
+  // months outstanding. That is the one case the park cannot recover
+  // from: an occupied lot cannot practically be reclaimed, so the
+  // balance stops being a debt with collateral behind it and becomes
+  // a loss.
+  //
+  // The threshold is an admin setting, not a constant. A cemetery
+  // moves this lever; it should not need a deployment to do it. Zero
+  // switches the check off, which is a legitimate choice.
+  const openContract = await findPayableContractForLot(ctx, args.lotId);
+  if (openContract !== null) {
+    const { intermentPaymentThresholdPercent } = await readAppSettings(ctx);
+    const paidCents = await sumPaidForContract(ctx, openContract._id);
+    const eligibility = checkIntermentEligibility(
+      {
+        totalPriceCents: openContract.totalPriceCents,
+        paidCents,
+        state: openContract.state,
+      },
+      intermentPaymentThresholdPercent,
+    );
+    if (!eligibility.eligible) {
+      throwError(
+        ErrorCode.INVARIANT_VIOLATION,
+        eligibility.reason ?? "This contract is not paid far enough.",
+        {
+          kind: "INTERMENT_PAYMENT_THRESHOLD",
+          lotId: args.lotId,
+          contractId: openContract._id,
+          shortfallCents: eligibility.shortfallCents,
+          requiredCents: eligibility.requiredCents,
+          paidCents: eligibility.paidCents,
+          thresholdPercent: eligibility.thresholdPercent,
+        },
+      );
+    }
+  }
+
+  // Occupant existence + belongs-to-lot invariant. The Story 7.1
+  // spec calls this out explicitly: without it, a malformed client
+  // could schedule occupant A's interment against lot B, then joins
+  // through `occupant.lotId` would produce inconsistent data. This
+  // is a server-side invariant, not just UI defense.
+  const occupant = await ctx.db.get(args.occupantId);
+  if (occupant === null) {
+    throwError(ErrorCode.NOT_FOUND, "Occupant not found.", {
+      occupantId: args.occupantId,
+    });
+  }
+  if (occupant.lotId !== args.lotId) {
+    throwError(
+      ErrorCode.INVARIANT_VIOLATION,
+      "Occupant does not belong to this lot.",
+      { occupantId: args.occupantId, lotId: args.lotId },
+    );
+  }
+  if (occupant.isRemoved) {
+    throwError(
+      ErrorCode.INVARIANT_VIOLATION,
+      "Cannot schedule an interment for a removed occupant.",
+      { occupantId: args.occupantId },
+    );
+  }
+
+  // Story 7.2 — double-booking guard. Run AFTER occupant validation
+  // (cheaper, more specific) and BEFORE insert. Convex mutations are
+  // transactional: this read + the insert below form a single unit
+  // of work, so a concurrent writer cannot slip a conflicting row in
+  // between the two operations.
+  //
+  // Two checks, evaluated in order:
+  //   1. Same-lot conflict (LOT_ALREADY_SCHEDULED) — the lot is busy.
+  //   2. Cross-lot timeslot conflict (TIMESLOT_ALREADY_BOOKED) — the
+  //      single interment crew is busy at a different lot in the
+  //      window. The cemetery has exactly one crew; opt out via
+  //      `INTERMENTS_ALLOW_CONCURRENT=true`.
+  //
+  // Same-lot is checked first because it's the strictly stronger
+  // failure mode (a sibling lot's crew can be re-routed; a same-lot
+  // overlap cannot).
+  const sameLotConflicts = await findSameLotConflicts(ctx, {
+    lotId: args.lotId,
+    scheduledAt: args.scheduledAt,
+  });
+  if (sameLotConflicts.length > 0) {
+    throwError(
+      ErrorCode.LOT_ALREADY_SCHEDULED,
+      "Double-booked: this lot already has an interment scheduled within the conflict window.",
+      {
+        conflictingIds: sameLotConflicts.map((c) => c.intermentId),
+        conflictWindowMs: INTERMENT_CONFLICT_WINDOW_MS,
+      },
+    );
+  }
+
+  if (!allowConcurrentInterments()) {
+    const crossLotConflicts = await findCrossLotConflicts(ctx, {
+      lotId: args.lotId,
+      scheduledAt: args.scheduledAt,
+    });
+    if (crossLotConflicts.length > 0) {
+      throwError(
+        ErrorCode.TIMESLOT_ALREADY_BOOKED,
+        "Timeslot busy: the interment crew is already scheduled at another lot within the conflict window.",
+        {
+          conflictingIds: crossLotConflicts.map((c) => c.intermentId),
+          conflictWindowMs: INTERMENT_CONFLICT_WINDOW_MS,
+        },
+      );
+    }
+  }
+
+  // Story 7.5 cross-table guard (Epic 7 C1 fix). The two checks above
+  // only scan the `interments` table — they are BLIND to the
+  // `ceremonies` table that Story 7.5 introduced. So a consecration
+  // booked on this lot+window via `scheduleCeremony` is invisible here,
+  // and the two paths can each book the same lot at the same time: the
+  // exact "family arrives to find a hole being dug for someone else"
+  // disaster Stories 7.2/7.5 exist to prevent. `assertNoBookingConflict`
+  // is the SAME authority `scheduleCeremony` uses; it scans BOTH tables
+  // with the half-open interval-overlap model and throws
+  // SCHEDULING_CONFLICT on a same-lot / chapel / pathway overlap. An
+  // interment occupies a fixed 60-minute window and (when scheduled via
+  // this mutation) reserves neither the chapel nor the pathway. Runs in
+  // the same transaction as the insert below — no TOCTOU window.
+  await assertNoBookingConflict(ctx, {
+    lotId: args.lotId,
+    scheduledAt: args.scheduledAt,
+    durationMinutes: INTERMENT_LEGACY_DURATION_MINUTES,
+    chapelReserved: false,
+    pathwayReserved: false,
+  });
+
+  const insertRow: {
+    lotId: LotId;
+    occupantId: OccupantId;
+    scheduledAt: number;
+    status: "scheduled";
+    notes?: string;
+    scheduledBy: typeof auth.userId;
+    scheduledAt_createdAt: number;
+  } = {
+    lotId: args.lotId,
+    occupantId: args.occupantId,
+    scheduledAt: args.scheduledAt,
+    status: "scheduled",
+    scheduledBy: auth.userId,
+    scheduledAt_createdAt: now,
+  };
+  if (trimmedNotes !== undefined && trimmedNotes.length > 0) {
+    insertRow.notes = trimmedNotes;
+  }
+  const intermentId = await ctx.db.insert("interments", insertRow);
+
+  // Audit. The `entityType` enum on `auditLog` does not include
+  // "interment"; we key on the lot (the aggregate root) and put the
+  // interment id inside the `after` payload. This matches the
+  // `occupants.addOccupant` precedent. Follow-up: extend the
+  // `auditLog.entityType` validator + `audit.ts` `AuditEntityType`
+  // alias to include "interment" once we want a dedicated audit feed
+  // per interment; coordinate with the audit-cornerstone owners.
+  await emitAudit(ctx, {
+    action: "create",
+    entityType: "lot",
+    entityId: args.lotId,
+    after: {
+      intermentId,
+      occupantId: args.occupantId,
+      scheduledAt: args.scheduledAt,
+      status: "scheduled" as const,
+    },
+    reason:
+      trimmedNotes !== undefined && trimmedNotes.length > 0
+        ? trimmedNotes
+        : "scheduled via lot detail",
+  });
+
+  return { intermentId };
+}
+
 export const scheduleInterment = mutationGeneric({
   args: {
     lotId: v.id("lots"),
@@ -284,249 +558,7 @@ export const scheduleInterment = mutationGeneric({
     },
   ): Promise<{ intermentId: IntermentId }> => {
     const auth = await requireRole(ctx, ["admin", "office_staff"]);
-
-    // Argument validation — defense in depth (client also Zod-validates).
-    if (
-      !Number.isFinite(args.scheduledAt) ||
-      !Number.isInteger(args.scheduledAt) ||
-      args.scheduledAt <= 0
-    ) {
-      throwError(
-        ErrorCode.VALIDATION,
-        "scheduledAt must be a positive integer (unix ms).",
-      );
-    }
-
-    const now = Date.now();
-    if (args.scheduledAt < now - INTERMENT_BACKFILL_TOLERANCE_MS) {
-      throwError(
-        ErrorCode.VALIDATION,
-        "Cannot schedule interments more than 1 day in the past.",
-      );
-    }
-
-    const trimmedNotes = args.notes !== undefined ? args.notes.trim() : undefined;
-    if (
-      trimmedNotes !== undefined &&
-      trimmedNotes.length > INTERMENT_NOTES_MAX_LENGTH
-    ) {
-      throwError(
-        ErrorCode.VALIDATION,
-        `Notes must be ${INTERMENT_NOTES_MAX_LENGTH} characters or fewer.`,
-      );
-    }
-
-    // Lot existence + retire guard. Retired lots cannot host new
-    // interments (matches `occupants.addOccupant` precedent).
-    const lot = await ctx.db.get(args.lotId);
-    if (lot === null) {
-      throwError(ErrorCode.NOT_FOUND, "Lot not found.", {
-        lotId: args.lotId,
-      });
-    }
-    if (lot.isRetired) {
-      throwError(
-        ErrorCode.INVARIANT_VIOLATION,
-        "Cannot schedule an interment on a retired lot.",
-        { lotId: args.lotId },
-      );
-    }
-    // Epic 7 H2 — the lot must be `sold` or `occupied`. `completeInterment`
-    // transitions the lot to `occupied`, and the lot state machine only
-    // allows `sold → occupied` (or an already-`occupied` family-plot lot
-    // taking another interment). Scheduling against an `available` /
-    // `reserved` / `defaulted` / `cancelled` / `transferred` lot creates
-    // an interment that can NEVER be completed (the completion transition
-    // would throw ILLEGAL_STATE_TRANSITION). Reject it at scheduling time
-    // — server-side, not just in the booking-form UI.
-    if (lot.status !== "sold" && lot.status !== "occupied") {
-      throwError(
-        ErrorCode.INVARIANT_VIOLATION,
-        "Interments can only be scheduled on a sold or occupied lot.",
-        { lotId: args.lotId, lotStatus: lot.status },
-      );
-    }
-
-    // Payment. A lot turns `sold` the moment a contract exists, so the
-    // status check above passes for an installment contract carrying
-    // only a down payment — a family could be interred with fifty-nine
-    // months outstanding. That is the one case the park cannot recover
-    // from: an occupied lot cannot practically be reclaimed, so the
-    // balance stops being a debt with collateral behind it and becomes
-    // a loss.
-    //
-    // The threshold is an admin setting, not a constant. A cemetery
-    // moves this lever; it should not need a deployment to do it. Zero
-    // switches the check off, which is a legitimate choice.
-    const openContract = await findPayableContractForLot(ctx, args.lotId);
-    if (openContract !== null) {
-      const { intermentPaymentThresholdPercent } = await readAppSettings(ctx);
-      const paidCents = await sumPaidForContract(ctx, openContract._id);
-      const eligibility = checkIntermentEligibility(
-        {
-          totalPriceCents: openContract.totalPriceCents,
-          paidCents,
-          state: openContract.state,
-        },
-        intermentPaymentThresholdPercent,
-      );
-      if (!eligibility.eligible) {
-        throwError(
-          ErrorCode.INVARIANT_VIOLATION,
-          eligibility.reason ?? "This contract is not paid far enough.",
-          {
-            kind: "INTERMENT_PAYMENT_THRESHOLD",
-            lotId: args.lotId,
-            contractId: openContract._id,
-            shortfallCents: eligibility.shortfallCents,
-            requiredCents: eligibility.requiredCents,
-            paidCents: eligibility.paidCents,
-            thresholdPercent: eligibility.thresholdPercent,
-          },
-        );
-      }
-    }
-
-    // Occupant existence + belongs-to-lot invariant. The Story 7.1
-    // spec calls this out explicitly: without it, a malformed client
-    // could schedule occupant A's interment against lot B, then joins
-    // through `occupant.lotId` would produce inconsistent data. This
-    // is a server-side invariant, not just UI defense.
-    const occupant = await ctx.db.get(args.occupantId);
-    if (occupant === null) {
-      throwError(ErrorCode.NOT_FOUND, "Occupant not found.", {
-        occupantId: args.occupantId,
-      });
-    }
-    if (occupant.lotId !== args.lotId) {
-      throwError(
-        ErrorCode.INVARIANT_VIOLATION,
-        "Occupant does not belong to this lot.",
-        { occupantId: args.occupantId, lotId: args.lotId },
-      );
-    }
-    if (occupant.isRemoved) {
-      throwError(
-        ErrorCode.INVARIANT_VIOLATION,
-        "Cannot schedule an interment for a removed occupant.",
-        { occupantId: args.occupantId },
-      );
-    }
-
-    // Story 7.2 — double-booking guard. Run AFTER occupant validation
-    // (cheaper, more specific) and BEFORE insert. Convex mutations are
-    // transactional: this read + the insert below form a single unit
-    // of work, so a concurrent writer cannot slip a conflicting row in
-    // between the two operations.
-    //
-    // Two checks, evaluated in order:
-    //   1. Same-lot conflict (LOT_ALREADY_SCHEDULED) — the lot is busy.
-    //   2. Cross-lot timeslot conflict (TIMESLOT_ALREADY_BOOKED) — the
-    //      single interment crew is busy at a different lot in the
-    //      window. The cemetery has exactly one crew; opt out via
-    //      `INTERMENTS_ALLOW_CONCURRENT=true`.
-    //
-    // Same-lot is checked first because it's the strictly stronger
-    // failure mode (a sibling lot's crew can be re-routed; a same-lot
-    // overlap cannot).
-    const sameLotConflicts = await findSameLotConflicts(ctx, {
-      lotId: args.lotId,
-      scheduledAt: args.scheduledAt,
-    });
-    if (sameLotConflicts.length > 0) {
-      throwError(
-        ErrorCode.LOT_ALREADY_SCHEDULED,
-        "Double-booked: this lot already has an interment scheduled within the conflict window.",
-        {
-          conflictingIds: sameLotConflicts.map((c) => c.intermentId),
-          conflictWindowMs: INTERMENT_CONFLICT_WINDOW_MS,
-        },
-      );
-    }
-
-    if (!allowConcurrentInterments()) {
-      const crossLotConflicts = await findCrossLotConflicts(ctx, {
-        lotId: args.lotId,
-        scheduledAt: args.scheduledAt,
-      });
-      if (crossLotConflicts.length > 0) {
-        throwError(
-          ErrorCode.TIMESLOT_ALREADY_BOOKED,
-          "Timeslot busy: the interment crew is already scheduled at another lot within the conflict window.",
-          {
-            conflictingIds: crossLotConflicts.map((c) => c.intermentId),
-            conflictWindowMs: INTERMENT_CONFLICT_WINDOW_MS,
-          },
-        );
-      }
-    }
-
-    // Story 7.5 cross-table guard (Epic 7 C1 fix). The two checks above
-    // only scan the `interments` table — they are BLIND to the
-    // `ceremonies` table that Story 7.5 introduced. So a consecration
-    // booked on this lot+window via `scheduleCeremony` is invisible here,
-    // and the two paths can each book the same lot at the same time: the
-    // exact "family arrives to find a hole being dug for someone else"
-    // disaster Stories 7.2/7.5 exist to prevent. `assertNoBookingConflict`
-    // is the SAME authority `scheduleCeremony` uses; it scans BOTH tables
-    // with the half-open interval-overlap model and throws
-    // SCHEDULING_CONFLICT on a same-lot / chapel / pathway overlap. An
-    // interment occupies a fixed 60-minute window and (when scheduled via
-    // this mutation) reserves neither the chapel nor the pathway. Runs in
-    // the same transaction as the insert below — no TOCTOU window.
-    await assertNoBookingConflict(ctx, {
-      lotId: args.lotId,
-      scheduledAt: args.scheduledAt,
-      durationMinutes: INTERMENT_LEGACY_DURATION_MINUTES,
-      chapelReserved: false,
-      pathwayReserved: false,
-    });
-
-    const insertRow: {
-      lotId: LotId;
-      occupantId: OccupantId;
-      scheduledAt: number;
-      status: "scheduled";
-      notes?: string;
-      scheduledBy: typeof auth.userId;
-      scheduledAt_createdAt: number;
-    } = {
-      lotId: args.lotId,
-      occupantId: args.occupantId,
-      scheduledAt: args.scheduledAt,
-      status: "scheduled",
-      scheduledBy: auth.userId,
-      scheduledAt_createdAt: now,
-    };
-    if (trimmedNotes !== undefined && trimmedNotes.length > 0) {
-      insertRow.notes = trimmedNotes;
-    }
-    const intermentId = await ctx.db.insert("interments", insertRow);
-
-    // Audit. The `entityType` enum on `auditLog` does not include
-    // "interment"; we key on the lot (the aggregate root) and put the
-    // interment id inside the `after` payload. This matches the
-    // `occupants.addOccupant` precedent. Follow-up: extend the
-    // `auditLog.entityType` validator + `audit.ts` `AuditEntityType`
-    // alias to include "interment" once we want a dedicated audit feed
-    // per interment; coordinate with the audit-cornerstone owners.
-    await emitAudit(ctx, {
-      action: "create",
-      entityType: "lot",
-      entityId: args.lotId,
-      after: {
-        intermentId,
-        occupantId: args.occupantId,
-        scheduledAt: args.scheduledAt,
-        status: "scheduled" as const,
-      },
-      reason:
-        trimmedNotes !== undefined && trimmedNotes.length > 0
-          ? trimmedNotes
-          : "scheduled via lot detail",
-    });
-
-    return { intermentId };
+    return createScheduledInterment(ctx, auth, args);
   },
 });
 

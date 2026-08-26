@@ -178,3 +178,43 @@ test.describe("the staff pages a field worker actually uses", () => {
     });
   }
 });
+
+test.describe("the office desk flows", () => {
+  requireAuthFixture();
+
+  // Both of these call office-only queries. They are NOT admin routes,
+  // so the middleware lets a field worker walk right in — which means
+  // the page itself has to decide what to ask for. Get that wrong and
+  // the render throws FORBIDDEN, exactly as /dashboard once did.
+  const officeRoutes = [
+    { route: "/interments/quick", denied: "quick-not-permitted" },
+    { route: "/lots/suggest", denied: "suggest-not-permitted" },
+  ];
+
+  for (const { route, denied } of officeRoutes) {
+    test(`office staff open ${route} cleanly`, async ({ page, signInAs }) => {
+      const errors = watchForCrashes(page);
+      await signInAs("office");
+      await openSettled(page, route);
+      await expectNotCrashed(page);
+      await expect(page.getByTestId(denied)).toHaveCount(0);
+      expect(errors, errors.join("\n")).toEqual([]);
+    });
+
+    test(`a field worker is told no on ${route}, not crashed`, async ({
+      page,
+      signInAs,
+    }) => {
+      const errors = watchForCrashes(page);
+      await signInAs("field");
+      await openSettled(page, route);
+      await expectNotCrashed(page);
+      // The distinction that matters: a sentence they can read, not
+      // React's error screen.
+      await expect(page.getByTestId(denied)).toBeVisible();
+      const forbidden = errors.filter((e) => /FORBIDDEN/i.test(e));
+      expect(forbidden, forbidden.join("\n")).toEqual([]);
+      expect(errors, errors.join("\n")).toEqual([]);
+    });
+  }
+});
