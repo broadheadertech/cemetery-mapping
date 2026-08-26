@@ -80,7 +80,11 @@ export const CEREMONY_DEFAULT_DURATION_MINUTES = {
   memorial_anniversary: 60,
 } as const;
 
-type CeremonyKind = "consecration" | "interment" | "memorial_anniversary";
+type CeremonyKind =
+  | "consecration"
+  | "interment"
+  | "memorial_anniversary"
+  | "wake";
 
 export interface CeremonyDetail {
   ceremonyId: CeremonyId;
@@ -144,6 +148,7 @@ export const scheduleCeremony = mutationGeneric({
       v.literal("consecration"),
       v.literal("interment"),
       v.literal("memorial_anniversary"),
+      v.literal("wake"),
     ),
     contractId: v.id("contracts"),
     lotId: v.id("lots"),
@@ -524,6 +529,7 @@ export const listCeremonies = queryGeneric({
         v.literal("consecration"),
         v.literal("interment"),
         v.literal("memorial_anniversary"),
+      v.literal("wake"),
       ),
     ),
     fromMs: v.optional(v.number()),

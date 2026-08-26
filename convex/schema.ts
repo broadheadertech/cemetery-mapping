@@ -1754,6 +1754,11 @@ export default defineSchema({
       v.literal("consecration"),
       v.literal("interment"),
       v.literal("memorial_anniversary"),
+      // The vigil before burial. Usually the longest time a family
+      // spends on the grounds, and it competes for the chapel with
+      // everything else — so it belongs in the conflict-checked
+      // calendar rather than in a notebook behind the desk.
+      v.literal("wake"),
     ),
     contractId: v.id("contracts"),
     // Story 2.9 forward-compat: stored as a string today; once 2.9

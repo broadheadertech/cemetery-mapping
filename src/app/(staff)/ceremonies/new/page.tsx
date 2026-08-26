@@ -26,7 +26,7 @@ import { makeFunctionReference } from "convex/server";
 
 import { translateError } from "@/lib/errors";
 
-type CeremonyKind = "consecration" | "interment" | "memorial_anniversary";
+type CeremonyKind = "consecration" | "interment" | "memorial_anniversary" | "wake";
 
 const scheduleCeremonyRef = makeFunctionReference<
   "mutation",
@@ -69,7 +69,9 @@ export default function NewCeremonyPage() {
   const searchParams = useSearchParams();
   const kindParam = searchParams.get("kind");
   const initialKind: CeremonyKind =
-    kindParam === "interment" || kindParam === "memorial_anniversary"
+    kindParam === "interment" ||
+    kindParam === "memorial_anniversary" ||
+    kindParam === "wake"
       ? kindParam
       : "consecration";
   const contractId = searchParams.get("contractId") ?? "";
@@ -191,6 +193,7 @@ export default function NewCeremonyPage() {
             className="block w-full min-h-[44px] rounded-md border border-slate-300 px-3 py-2 text-sm"
           >
             <option value="consecration">Consecration</option>
+            <option value="wake">Wake</option>
             <option value="interment">Interment ceremony</option>
             <option value="memorial_anniversary">Memorial anniversary</option>
           </select>

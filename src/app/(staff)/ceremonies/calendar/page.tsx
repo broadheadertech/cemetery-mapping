@@ -24,11 +24,11 @@ import { useMemo, useState } from "react";
 import { useQuery } from "convex/react";
 import { makeFunctionReference } from "convex/server";
 
-type KindFilter = "all" | "consecration" | "interment";
+type KindFilter = "all" | "consecration" | "wake" | "interment";
 
 interface ListedCeremonyShape {
   ceremonyId: string;
-  kind: "consecration" | "interment" | "memorial_anniversary";
+  kind: "consecration" | "interment" | "memorial_anniversary" | "wake";
   status: "scheduled" | "completed" | "cancelled";
   contractId: string;
   lotId: string;
@@ -55,7 +55,7 @@ interface LegacyIntermentShape {
 const listCeremoniesRef = makeFunctionReference<
   "query",
   {
-    kindFilter?: "consecration" | "interment" | "memorial_anniversary";
+    kindFilter?: "consecration" | "interment" | "memorial_anniversary" | "wake";
     fromMs?: number;
     toMs?: number;
     includeCancelled?: boolean;
@@ -98,14 +98,18 @@ export default function CeremonyCalendarPage() {
     kindFilter:
       kindFilter === "consecration"
         ? "consecration"
-        : kindFilter === "interment"
-          ? "interment"
-          : undefined,
+        : kindFilter === "wake"
+          ? "wake"
+          : kindFilter === "interment"
+            ? "interment"
+            : undefined,
   });
   // Only fetch the legacy interments table when the filter allows it.
   const interments = useQuery(
     listIntermentsInRangeRef,
-    kindFilter === "consecration"
+    // The legacy interments table holds no wakes or consecrations, so
+    // fetching it while filtering to either would only add latency.
+    kindFilter === "consecration" || kindFilter === "wake"
       ? "skip"
       : { fromMs: bounds.fromMs, toMs: bounds.toMs },
   );
@@ -150,7 +154,7 @@ export default function CeremonyCalendarPage() {
             Ceremony calendar
           </h1>
           <p className="text-sm text-slate-600">
-            Consecrations, interments, and memorials over the next 60 days.
+            Consecrations, wakes, interments, and memorials over the next 60 days.
           </p>
         </div>
         <Link
@@ -166,7 +170,7 @@ export default function CeremonyCalendarPage() {
         role="group"
         aria-label="Filter by ceremony kind"
       >
-        {(["all", "consecration", "interment"] as const).map((k) => (
+        {(["all", "consecration", "wake", "interment"] as const).map((k) => (
           <button
             key={k}
             type="button"
@@ -182,7 +186,9 @@ export default function CeremonyCalendarPage() {
               ? "All"
               : k === "consecration"
                 ? "Consecrations"
-                : "Interments"}
+                : k === "wake"
+                  ? "Wakes"
+                  : "Interments"}
           </button>
         ))}
       </div>
