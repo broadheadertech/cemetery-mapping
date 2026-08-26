@@ -869,7 +869,7 @@ describe("wake", () => {
       pathwayReserved: false,
       status: "scheduled",
       scheduledBy: USER_ID,
-      scheduledAtRecordedMs: T0,
+      scheduledAt_createdAt: T0,
     };
     const { ctx } = makeCtx({
       roles: ["office_staff"],
