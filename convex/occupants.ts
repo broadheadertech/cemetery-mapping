@@ -45,6 +45,11 @@ import schema from "./schema";
 import { requireRole, type MutationCtx, type QueryCtx } from "./lib/auth";
 import { emitAudit } from "./lib/audit";
 import { ErrorCode, throwError } from "./lib/errors";
+import {
+  canAdmit,
+  capacityReport,
+  type IntermentKind,
+} from "./lib/lotCapacity";
 import { DAY_MS } from "./lib/time";
 
 type DataModel = DataModelFromSchemaDefinition<typeof schema>;
@@ -141,6 +146,14 @@ export const addOccupant = mutationGeneric({
   args: {
     lotId: v.id("lots"),
     name: v.string(),
+    /**
+     * A body, or a set of transferred bones. Bones take half the space
+     * — see `convex/lib/lotCapacity.ts`. Defaults to `body`, the
+     * larger of the two, so an omission can never overfill a lot.
+     */
+    intermentKind: v.optional(
+      v.union(v.literal("body"), v.literal("bones")),
+    ),
     dateOfInterment: v.optional(v.number()),
     relationshipToOwner: v.string(),
     notes: v.optional(v.string()),
@@ -150,6 +163,7 @@ export const addOccupant = mutationGeneric({
     args: {
       lotId: LotId;
       name: string;
+      intermentKind?: IntermentKind;
       dateOfInterment?: number;
       relationshipToOwner: string;
       notes?: string;
@@ -227,10 +241,32 @@ export const addOccupant = mutationGeneric({
       );
     }
 
+    // Capacity. Until now nothing stopped a lot being filled past what
+    // it physically holds — the only guard was a double-booking check on
+    // TIME, which says nothing about space. A family told there is room
+    // beside their father, at the graveside, is not a defect anyone can
+    // apologise their way out of.
+    const kind: IntermentKind = args.intermentKind ?? "body";
+    const existing = await ctx.db
+      .query("occupants")
+      .withIndex("by_lot", (q) => q.eq("lotId", args.lotId))
+      .collect();
+    const admit = canAdmit(lot, existing, kind);
+    if (!admit.ok) {
+      throwError(ErrorCode.INVARIANT_VIOLATION, admit.reason ?? "Lot is full.", {
+        kind: "LOT_AT_CAPACITY",
+        lotId: args.lotId,
+        capacityUnits: admit.report.capacityUnits,
+        usedUnits: admit.report.usedUnits,
+        remainingUnits: admit.report.remainingUnits,
+      });
+    }
+
     const createdAt = Date.now();
     const insertRow: {
       lotId: LotId;
       name: string;
+      intermentKind?: IntermentKind;
       dateOfInterment?: number;
       relationshipToOwner: string;
       notes?: string;
@@ -240,6 +276,7 @@ export const addOccupant = mutationGeneric({
     } = {
       lotId: args.lotId,
       name: trimmedName,
+      intermentKind: kind,
       relationshipToOwner: trimmedRelationship,
       createdAt,
       createdByUserId: auth.userId,
@@ -265,6 +302,7 @@ export const addOccupant = mutationGeneric({
       after: {
         occupantId,
         name: trimmedName,
+        intermentKind: kind,
         dateOfInterment: args.dateOfInterment,
         relationshipToOwner: trimmedRelationship,
       },
@@ -334,5 +372,47 @@ export const removeOccupant = mutationGeneric({
     });
 
     return { occupantId: args.occupantId };
+  },
+});
+
+/**
+ * What room a lot has left.
+ *
+ * Backs the lot detail page and the quick-response scheduler, so both
+ * answer "will another interment fit here?" from the same arithmetic
+ * that `addOccupant` enforces. A screen that computed its own would
+ * eventually disagree with the mutation, and the family would be told
+ * one thing by the page and another by the save button.
+ */
+export const getLotCapacity = queryGeneric({
+  args: { lotId: v.id("lots") },
+  handler: async (
+    ctx: QueryCtx,
+    args: { lotId: LotId },
+  ): Promise<{
+    capacityUnits: number;
+    usedUnits: number;
+    remainingUnits: number;
+    bodiesRemaining: number;
+    bonesRemaining: number;
+    isFull: boolean;
+    canTakeBody: boolean;
+    canTakeBones: boolean;
+  }> => {
+    await requireRole(ctx, ["admin", "office_staff", "field_worker"]);
+    const lot = await ctx.db.get(args.lotId);
+    if (lot === null) {
+      throwError(ErrorCode.NOT_FOUND, "Lot not found.", { lotId: args.lotId });
+    }
+    const occupants = await ctx.db
+      .query("occupants")
+      .withIndex("by_lot", (q) => q.eq("lotId", args.lotId))
+      .collect();
+    const report = capacityReport(lot, occupants);
+    return {
+      ...report,
+      canTakeBody: canAdmit(lot, occupants, "body").ok,
+      canTakeBones: canAdmit(lot, occupants, "bones").ok,
+    };
   },
 });

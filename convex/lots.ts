@@ -60,6 +60,7 @@ import {
 } from "./lib/geometry";
 import { transitionLotStatus } from "./lib/stateMachines";
 import { LOT_STATUSES, type LotStatus } from "./lib/states";
+import { DEFAULT_CAPACITY_UNITS } from "./lib/lotCapacity";
 
 type DataModel = DataModelFromSchemaDefinition<typeof schema>;
 type LotDoc = DataModel["lots"]["document"];
@@ -361,6 +362,7 @@ export const createLot = mutationGeneric({
       row: string;
       type: "single" | "family" | "mausoleum" | "niche";
       dimensions: { widthM: number; depthM: number };
+      capacityUnits: number;
       basePriceCents: number;
       status: "available";
       geometry: typeof geometry;
@@ -375,6 +377,10 @@ export const createLot = mutationGeneric({
       row: args.row,
       type: args.type,
       dimensions: args.dimensions,
+      // Seeded from the type; an admin can adjust an individual lot
+      // afterwards. Set explicitly at creation rather than left to the
+      // fallback so the number is visible in the record and in audit.
+      capacityUnits: DEFAULT_CAPACITY_UNITS[args.type],
       basePriceCents: args.basePriceCents,
       status: "available",
       geometry,

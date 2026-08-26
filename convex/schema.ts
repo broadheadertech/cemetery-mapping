@@ -269,6 +269,21 @@ export default defineSchema({
       widthM: v.number(),
       depthM: v.number(),
     }),
+    /**
+     * How much this lot holds, in HALF-BODY UNITS: a body is 2, a set
+     * of bones is 1, so a standard two-body lot is 4.
+     *
+     * Two sets of bones occupy the space of one body — bone transfer is
+     * ordinary practice, and a family plot that has taken a reduction
+     * has room again. Counting in halves as integers keeps floating
+     * point out of the question "will my mother fit beside my father";
+     * see `convex/lib/lotCapacity.ts`.
+     *
+     * Optional because it defaults from the lot's type, and because
+     * every lot that existed before this rule has no value. Absent
+     * means "use the type's default" — never "unlimited".
+     */
+    capacityUnits: v.optional(v.number()),
     basePriceCents: v.number(),
     status: v.union(
       v.literal("available"),
@@ -932,6 +947,18 @@ export default defineSchema({
   occupants: defineTable({
     lotId: v.id("lots"),
     name: v.string(),
+    /**
+     * Whether this is a body or a set of transferred bones. Drives how
+     * much of the lot's capacity the occupant consumes — see
+     * `convex/lib/lotCapacity.ts`.
+     *
+     * Optional because records predating the capacity rule do not say.
+     * Those count as a BODY: guessing high costs a correction at the
+     * counter, guessing low promises a family space that is not there.
+     */
+    intermentKind: v.optional(
+      v.union(v.literal("body"), v.literal("bones")),
+    ),
     dateOfInterment: v.optional(v.number()),
     relationshipToOwner: v.string(),
     notes: v.optional(v.string()),

@@ -60,6 +60,7 @@ import { emitAudit } from "./lib/audit";
 import { bumpLotStatusCounter } from "./lib/dashboardCounters";
 import { ErrorCode, throwError } from "./lib/errors";
 import { getDefaultPlaceholderGeometry } from "./lib/geometry";
+import { DEFAULT_CAPACITY_UNITS } from "./lib/lotCapacity";
 import {
   type LotImportRow,
   type LotImportRowError,
@@ -208,6 +209,7 @@ export const importLotBatch = mutationGeneric({
         row: string;
         type: ValidatedLotImportRow["type"];
         dimensions: { widthM: number; depthM: number };
+        capacityUnits: number;
         basePriceCents: number;
         status: ValidatedLotImportRow["status"];
         geometry: typeof geometry;
@@ -222,6 +224,7 @@ export const importLotBatch = mutationGeneric({
         row: row.row,
         type: row.type,
         dimensions: row.dimensions,
+        capacityUnits: DEFAULT_CAPACITY_UNITS[row.type],
         basePriceCents: row.basePriceCents,
         status: row.status,
         geometry,
