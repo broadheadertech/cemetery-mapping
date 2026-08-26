@@ -66,6 +66,7 @@ import { v } from "convex/values";
 
 import schema from "./schema";
 import { requireRole, type MutationCtx, type QueryCtx } from "./lib/auth";
+import { normaliseThreshold } from "./lib/intermentEligibility";
 import { emitAudit } from "./lib/audit";
 import { add } from "./lib/money";
 
@@ -463,6 +464,7 @@ export interface SalesByDimensionReport {
  */
 export async function readAppSettings(ctx: QueryCtx): Promise<{
   salesAgentTrackingEnabled: boolean;
+  intermentPaymentThresholdPercent: number;
 }> {
   const row = await ctx.db
     .query("appSettings")
@@ -470,6 +472,9 @@ export async function readAppSettings(ctx: QueryCtx): Promise<{
     .first();
   return {
     salesAgentTrackingEnabled: row?.salesAgentTrackingEnabled ?? false,
+    intermentPaymentThresholdPercent: normaliseThreshold(
+      row?.intermentPaymentThresholdPercent,
+    ),
   };
 }
 

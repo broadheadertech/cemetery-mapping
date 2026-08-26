@@ -2870,6 +2870,16 @@ export default defineSchema({
   appSettings: defineTable({
     key: v.literal("singleton"),
     salesAgentTrackingEnabled: v.optional(v.boolean()),
+    /**
+     * Share of a contract that must be paid before an interment may be
+     * scheduled on its lot. 50 by default.
+     *
+     * A commercial lever, so it is a setting rather than a constant —
+     * the cemetery will want to move it without a deployment. Zero means
+     * no condition, which is a legitimate choice and simply switches the
+     * check off. See `convex/lib/intermentEligibility.ts`.
+     */
+    intermentPaymentThresholdPercent: v.optional(v.number()),
   }).index("by_key", ["key"]),
 
   /**

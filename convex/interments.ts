@@ -50,6 +50,8 @@ import schema from "./schema";
 import { requireRole, type MutationCtx, type QueryCtx } from "./lib/auth";
 import { emitAudit } from "./lib/audit";
 import { ErrorCode, throwError } from "./lib/errors";
+import { checkIntermentEligibility } from "./lib/intermentEligibility";
+import { readAppSettings } from "./reports";
 import {
   assertIntermentTransition,
   transitionLotStatus,
@@ -62,6 +64,7 @@ import { DAY_MS, HOUR_MS, MINUTE_MS } from "./lib/time";
 
 type DataModel = DataModelFromSchemaDefinition<typeof schema>;
 type LotId = DataModel["lots"]["document"]["_id"];
+type ContractId = DataModel["contracts"]["document"]["_id"];
 type OccupantDoc = DataModel["occupants"]["document"];
 type OccupantId = OccupantDoc["_id"];
 type IntermentDoc = DataModel["interments"]["document"];
@@ -214,6 +217,56 @@ export interface IntermentDetail extends ListedInterment {
  *     is single-crew (the default). Opt out via
  *     `INTERMENTS_ALLOW_CONCURRENT=true`.
  */
+/**
+ * The contract still owing on this lot, if any.
+ *
+ * A settled or voided contract puts no condition on interment; only a
+ * live one does. `paid_in_full` is deliberately excluded — the family
+ * has met the whole price, so there is nothing left to gate on.
+ */
+async function findPayableContractForLot(
+  ctx: MutationCtx,
+  lotId: LotId,
+): Promise<{
+  _id: ContractId;
+  totalPriceCents: number;
+  state: string;
+} | null> {
+  const rows = await ctx.db
+    .query("contracts")
+    .withIndex("by_lot", (q) => q.eq("lotId", lotId))
+    .collect();
+  const open = rows.find(
+    (c) => c.state === "active" || c.state === "in_default",
+  );
+  return open === undefined
+    ? null
+    : {
+        _id: open._id,
+        totalPriceCents: open.totalPriceCents,
+        state: open.state,
+      };
+}
+
+/**
+ * Everything received against a contract, from the installment rows.
+ *
+ * Summed from `installments.paidCents` rather than from payments,
+ * because that is where allocation lands — and allocation is what
+ * decides how much of this contract is actually paid, as opposed to how
+ * much money the customer has handed over across everything they own.
+ */
+async function sumPaidForContract(
+  ctx: MutationCtx,
+  contractId: ContractId,
+): Promise<number> {
+  const installments = await ctx.db
+    .query("installments")
+    .withIndex("by_contract", (q) => q.eq("contractId", contractId))
+    .collect();
+  return installments.reduce((total, i) => total + i.paidCents, 0);
+}
+
 export const scheduleInterment = mutationGeneric({
   args: {
     lotId: v.id("lots"),
@@ -292,6 +345,46 @@ export const scheduleInterment = mutationGeneric({
         "Interments can only be scheduled on a sold or occupied lot.",
         { lotId: args.lotId, lotStatus: lot.status },
       );
+    }
+
+    // Payment. A lot turns `sold` the moment a contract exists, so the
+    // status check above passes for an installment contract carrying
+    // only a down payment — a family could be interred with fifty-nine
+    // months outstanding. That is the one case the park cannot recover
+    // from: an occupied lot cannot practically be reclaimed, so the
+    // balance stops being a debt with collateral behind it and becomes
+    // a loss.
+    //
+    // The threshold is an admin setting, not a constant. A cemetery
+    // moves this lever; it should not need a deployment to do it. Zero
+    // switches the check off, which is a legitimate choice.
+    const openContract = await findPayableContractForLot(ctx, args.lotId);
+    if (openContract !== null) {
+      const { intermentPaymentThresholdPercent } = await readAppSettings(ctx);
+      const paidCents = await sumPaidForContract(ctx, openContract._id);
+      const eligibility = checkIntermentEligibility(
+        {
+          totalPriceCents: openContract.totalPriceCents,
+          paidCents,
+          state: openContract.state,
+        },
+        intermentPaymentThresholdPercent,
+      );
+      if (!eligibility.eligible) {
+        throwError(
+          ErrorCode.INVARIANT_VIOLATION,
+          eligibility.reason ?? "This contract is not paid far enough.",
+          {
+            kind: "INTERMENT_PAYMENT_THRESHOLD",
+            lotId: args.lotId,
+            contractId: openContract._id,
+            shortfallCents: eligibility.shortfallCents,
+            requiredCents: eligibility.requiredCents,
+            paidCents: eligibility.paidCents,
+            thresholdPercent: eligibility.thresholdPercent,
+          },
+        );
+      }
     }
 
     // Occupant existence + belongs-to-lot invariant. The Story 7.1
