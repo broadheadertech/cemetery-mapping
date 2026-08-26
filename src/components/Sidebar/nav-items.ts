@@ -21,6 +21,7 @@ import {
   LineChart,
   Boxes,
   MessageSquare,
+  Sparkles,
 } from "lucide-react";
 import type { Role } from "@/types/role";
 
@@ -104,6 +105,14 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
   {
     label: "Sales & Records",
     items: [
+      {
+        // Ranks available lots against what a family has said they need.
+        // Sits beside Sales because that is the conversation it serves.
+        href: "/lots/suggest",
+        label: "Suggest a lot",
+        icon: Sparkles,
+        requiredRoles: ["admin", "office_staff"],
+      },
       {
         href: "/customers",
         label: "Customers",
