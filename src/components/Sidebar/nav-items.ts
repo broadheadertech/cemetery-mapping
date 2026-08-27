@@ -230,6 +230,15 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
         requiredRoles: ["admin"],
       },
       {
+        // What the cemetery charges, and the offers on top. Admin-only:
+        // office staff read plans to fill a sale form and must not be
+        // able to mint one on the way to closing a sale.
+        href: "/admin/settings/payment-plans",
+        label: "Payment plans",
+        icon: Wallet,
+        requiredRoles: ["admin"],
+      },
+      {
         href: "/admin/expense-approvals",
         label: "Expense approvals",
         icon: ClipboardCheck,

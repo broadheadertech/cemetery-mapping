@@ -48,6 +48,12 @@ const GROUPS: AdminGroup[] = [
         description: "Runtime toggles, e.g. sales-agent tracking.",
       },
       {
+        href: "/admin/settings/payment-plans",
+        title: "Payment plans and promotions",
+        description:
+          "The ways a lot can be bought — cash terms, instalment options, and time-boxed offers. The sale desk fills a contract from these.",
+      },
+      {
         href: "/admin/settings/perpetual-care",
         title: "Perpetual-care policy",
         description:

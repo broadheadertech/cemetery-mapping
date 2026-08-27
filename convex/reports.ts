@@ -67,6 +67,7 @@ import { v } from "convex/values";
 import schema from "./schema";
 import { requireRole, type MutationCtx, type QueryCtx } from "./lib/auth";
 import { normaliseThreshold } from "./lib/intermentEligibility";
+import { DEFAULT_MAX_DISCOUNT_PERCENT } from "./lib/pricing";
 import { emitAudit } from "./lib/audit";
 import { add } from "./lib/money";
 
@@ -465,6 +466,7 @@ export interface SalesByDimensionReport {
 export async function readAppSettings(ctx: QueryCtx): Promise<{
   salesAgentTrackingEnabled: boolean;
   intermentPaymentThresholdPercent: number;
+  maxDiscountPercent: number;
 }> {
   const row = await ctx.db
     .query("appSettings")
@@ -475,6 +477,16 @@ export async function readAppSettings(ctx: QueryCtx): Promise<{
     intermentPaymentThresholdPercent: normaliseThreshold(
       row?.intermentPaymentThresholdPercent,
     ),
+    // A backstop on compounding relief, not a policy dial. Absent means
+    // the default, never "no ceiling" — an unset row must not be the
+    // thing that lets a mistyped promotion give a lot away.
+    maxDiscountPercent:
+      typeof row?.maxDiscountPercent === "number" &&
+      Number.isFinite(row.maxDiscountPercent) &&
+      row.maxDiscountPercent >= 0 &&
+      row.maxDiscountPercent <= 100
+        ? row.maxDiscountPercent
+        : DEFAULT_MAX_DISCOUNT_PERCENT,
   };
 }
 

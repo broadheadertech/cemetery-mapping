@@ -131,6 +131,12 @@ export default defineSchema({
       // the enquiry arriving is not an operator action and emits
       // nothing.
       v.literal("enquiry"),
+      // Payment plans and promotions — an admin changing what the
+      // cemetery charges is exactly the kind of event the log exists
+      // for, and "which plan was this sold under" has to be answerable
+      // long after the plan is retired.
+      v.literal("payment_plan"),
+      v.literal("promo"),
     ),
     entityId: v.string(),
     before: v.optional(v.any()),
@@ -1156,6 +1162,21 @@ export default defineSchema({
     basePriceCents: v.optional(v.number()),
     discountCents: v.optional(v.number()),
     discountReason: v.optional(v.string()),
+    /**
+     * Which offer this was sold under.
+     *
+     * Recorded so the question "how many lots did the All Souls promo
+     * actually move" has an answer that is not a guess. Optional
+     * throughout: every contract written before payment plans existed
+     * has neither, and a sale can still be priced by hand.
+     *
+     * `promoCode` is denormalised on purpose. A promotion can be
+     * renamed or retired, and the contract must go on saying what the
+     * family was actually quoted.
+     */
+    paymentPlanId: v.optional(v.id("paymentPlans")),
+    promoId: v.optional(v.id("promos")),
+    promoCode: v.optional(v.string()),
     // Story 3.8 (FR25) — perpetual care fee addon.
     //
     // Phase 1 scope per the §10 Q7-pending interpretation: a single
@@ -2891,7 +2912,136 @@ export default defineSchema({
      * check off. See `convex/lib/intermentEligibility.ts`.
      */
     intermentPaymentThresholdPercent: v.optional(v.number()),
+    /**
+     * Ceiling on total relief in a quote, as a share of the lot's list
+     * price. 50 by default.
+     *
+     * A backstop, not a policy: plan discounts, promotions and a desk
+     * discount compound, and three modest ones can pass a ceiling none
+     * of them would alone. The cap applies to the TOTAL and is reported
+     * in the quote when it bites, so nobody sells a lot at a figure
+     * they did not intend. See `convex/lib/pricing.ts`.
+     */
+    maxDiscountPercent: v.optional(v.number()),
   }).index("by_key", ["key"]),
+
+  /**
+   * Payment plans — the ways a lot may be bought.
+   *
+   * Before this table the terms were retyped at every sale: an operator
+   * entered a price, a discount, a reason, a down payment, a term and a
+   * monthly amount, freehand, per family. The cemetery had no way to
+   * say "cash is ten per cent off and there are three instalment
+   * options" other than telling people and hoping.
+   *
+   * A plan is the cemetery's offer, named. `convex/lib/pricing.ts`
+   * turns one into a figure; the sale mutations still receive explicit
+   * centavo amounts and re-validate them, so a plan is a way to fill
+   * the form correctly rather than a new trusted path into the money.
+   *
+   * Field notes:
+   *   - `kind` — matches `contracts.kind`. A plan produces one or the
+   *     other; there is no plan that is both.
+   *   - `discountPercent` — relief for choosing this plan. The cash
+   *     discount is the usual case.
+   *   - `downPaymentPercent` / `termMonths` — instalment only. Both are
+   *     required for an instalment plan to quote; the pricing module
+   *     warns by name when one is missing rather than letting the
+   *     operator meet a raw rejection at submit.
+   *   - `surchargePercent` — instalment only, and normally absent. What
+   *     the park adds for carrying the balance. Applied AFTER relief.
+   *   - `appliesToLotTypes` — empty means every type, which is what a
+   *     form produces when nobody ticks anything.
+   *   - `isDefault` — the plan the sale form opens on. At most one per
+   *     `kind`; the mutation clears the previous holder rather than
+   *     trusting the caller to.
+   *   - `isRetired` — soft delete. A retired plan disappears from the
+   *     form but stays readable, because contracts reference it and a
+   *     contract must still be able to say what it was sold under.
+   */
+  paymentPlans: defineTable({
+    name: v.string(),
+    description: v.optional(v.string()),
+    kind: v.union(v.literal("full_payment"), v.literal("installment")),
+    discountPercent: v.optional(v.number()),
+    downPaymentPercent: v.optional(v.number()),
+    termMonths: v.optional(v.number()),
+    surchargePercent: v.optional(v.number()),
+    appliesToLotTypes: v.array(
+      v.union(
+        v.literal("single"),
+        v.literal("family"),
+        v.literal("mausoleum"),
+        v.literal("niche"),
+      ),
+    ),
+    isDefault: v.boolean(),
+    sortOrder: v.number(),
+    isRetired: v.boolean(),
+    createdAt: v.number(),
+    createdByUserId: v.id("users"),
+    updatedAt: v.number(),
+    updatedByUserId: v.optional(v.id("users")),
+  })
+    .index("by_kind", ["kind"])
+    .index("by_isRetired", ["isRetired"])
+    .index("by_sortOrder", ["sortOrder"]),
+
+  /**
+   * Promotions — time-boxed offers on top of a plan.
+   *
+   * Distinct from `paymentPlans` because they expire. A plan is what
+   * the cemetery sells; a promotion is what it is doing this month, and
+   * the difference matters when someone asks in March how many lots the
+   * All Souls offer actually moved.
+   *
+   * Field notes:
+   *   - `startsAt` / `endsAt` — epoch ms. The window is half-open:
+   *     `startsAt` inclusive, `endsAt` exclusive, so an offer "until 5
+   *     November" ends at Manila midnight on the 5th and there is no
+   *     hour where two readings are possible.
+   *   - `discountPercent` XOR `discountCents` — one or the other. Both
+   *     is a data error; the pricing module applies the larger and says
+   *     so rather than silently compounding them.
+   *   - `appliesTo*` — empty means unrestricted, in every case.
+   *   - `maxRedemptions` / `redemptionCount` — an offer capped at fifty
+   *     lots must stop at fifty. The count is incremented inside the
+   *     sale mutation, in the same transaction as the contract, or two
+   *     concurrent sales both read forty-nine and both proceed.
+   *   - `code` — optional. A promotion with no code applies on its own
+   *     terms; one with a code has to be quoted deliberately.
+   */
+  promos: defineTable({
+    name: v.string(),
+    code: v.optional(v.string()),
+    description: v.optional(v.string()),
+    discountPercent: v.optional(v.number()),
+    discountCents: v.optional(v.number()),
+    startsAt: v.number(),
+    endsAt: v.number(),
+    appliesToLotTypes: v.array(
+      v.union(
+        v.literal("single"),
+        v.literal("family"),
+        v.literal("mausoleum"),
+        v.literal("niche"),
+      ),
+    ),
+    appliesToSections: v.array(v.string()),
+    appliesToPlanKinds: v.array(
+      v.union(v.literal("full_payment"), v.literal("installment")),
+    ),
+    maxRedemptions: v.optional(v.number()),
+    redemptionCount: v.number(),
+    isRetired: v.boolean(),
+    createdAt: v.number(),
+    createdByUserId: v.id("users"),
+    updatedAt: v.number(),
+    updatedByUserId: v.optional(v.id("users")),
+  })
+    .index("by_code", ["code"])
+    .index("by_isRetired", ["isRetired"])
+    .index("by_endsAt", ["endsAt"]),
 
   /**
    * Perpetual care policy — Story 3.8 rebuild (FR25).
