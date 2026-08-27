@@ -130,6 +130,8 @@ interface CtxBag {
   receiptCounters: Map<string, ReceiptCounterFixture>;
   auditInserts: Array<{ row: Record<string, unknown> }>;
   patches: Array<{ id: string; patch: Record<string, unknown> }>;
+  promos: Map<string, Record<string, unknown>>;
+  paymentPlans: Map<string, Record<string, unknown>>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ctx: any;
 }
@@ -139,9 +141,26 @@ function makeCtx(opts: {
   initialLots?: LotFixture[];
   initialCustomers?: CustomerFixture[];
   initialContracts?: ContractFixture[];
+  /**
+   * Offers the sale can be made under.
+   *
+   * The sale mutations now stamp `paymentPlanId` / `promoId` /
+   * `promoCode` on the contract and claim a promotion's redemption in
+   * the SAME transaction — two concurrent sales against a fifty-lot
+   * offer must not both read forty-nine and proceed. With no promos
+   * table the whole path short-circuits and is never exercised.
+   */
+  initialPlans?: Record<string, unknown>[];
+  initialPromos?: Record<string, unknown>[];
   authenticated?: boolean;
   seedCounter?: boolean;
 }): CtxBag {
+  const paymentPlans = new Map<string, Record<string, unknown>>(
+    (opts.initialPlans ?? []).map((p) => [p["_id"] as string, p]),
+  );
+  const promos = new Map<string, Record<string, unknown>>(
+    (opts.initialPromos ?? []).map((p) => [p["_id"] as string, p]),
+  );
   const lots = new Map<string, LotFixture>(
     (opts.initialLots ?? []).map((l) => [l._id, l]),
   );
@@ -348,6 +367,8 @@ function makeCtx(opts: {
         if (payments.has(id)) return payments.get(id);
         if (receipts.has(id)) return receipts.get(id);
         if (receiptCounters.has(id)) return receiptCounters.get(id);
+        if (paymentPlans.has(id)) return paymentPlans.get(id);
+        if (promos.has(id)) return promos.get(id);
         return null;
       }),
       query: vi.fn((table: string) => tableQuery(table)),
@@ -415,6 +436,9 @@ function makeCtx(opts: {
         } else if (receipts.has(id)) {
           const existing = receipts.get(id)!;
           receipts.set(id, { ...existing, ...patch });
+        } else if (promos.has(id)) {
+          const existing = promos.get(id)!;
+          promos.set(id, { ...existing, ...patch });
         }
       }),
     },
@@ -428,6 +452,8 @@ function makeCtx(opts: {
     receipts,
     paymentAllocations,
     receiptCounters,
+    promos,
+    paymentPlans,
     auditInserts,
     patches,
     ctx,
@@ -1225,5 +1251,162 @@ describe("transitionState", () => {
       reason: "Cannot un-cancel a cancelled contract",
     }).catch((e: unknown) => e);
     expect(getCode(thrown)).toBe(ErrorCode.ILLEGAL_STATE_TRANSITION);
+  });
+});
+
+/**
+ * The offer a sale was made under.
+ *
+ * Two things have to hold. The contract must say which plan and which
+ * promotion produced its figures — "how many lots did the All Souls
+ * promo actually move" is not answerable from a discount amount alone.
+ * And a promotion capped at fifty lots has to stop at fifty, which
+ * means the count is claimed inside the sale mutation: anywhere else
+ * and two concurrent sales both read forty-nine and both proceed.
+ */
+describe("recording the offer on a sale", () => {
+  const run = handlerOf(recordFullPaymentSale);
+
+  const PLAN = {
+    _id: "paymentPlans:cash",
+    _creationTime: T0,
+    name: "Cash",
+    kind: "full_payment",
+    appliesToLotTypes: [],
+    isDefault: true,
+    sortOrder: 1,
+    isRetired: false,
+  };
+
+  function promoRow(over: Record<string, unknown> = {}) {
+    return {
+      _id: "promos:allsouls",
+      _creationTime: T0,
+      name: "All Souls",
+      code: "UNDAS26",
+      discountPercent: 5,
+      startsAt: T0 - 1000,
+      endsAt: T0 + 1_000_000,
+      appliesToLotTypes: [],
+      appliesToSections: [],
+      appliesToPlanKinds: [],
+      redemptionCount: 0,
+      isRetired: false,
+      ...over,
+    };
+  }
+
+  function saleArgs(over: Record<string, unknown> = {}) {
+    return {
+      lotId: "lots:1",
+      customerId: "customers:1",
+      totalPriceCents: 150_000_00,
+      method: "cash" as const,
+      paidAt: T0,
+      idempotencyKey: "idem-offer-1",
+      ...over,
+    };
+  }
+
+  function world(over: { promos?: Record<string, unknown>[] } = {}) {
+    return makeCtx({
+      roles: ["office_staff"],
+      initialLots: [makeLot({ _id: "lots:1" })],
+      initialCustomers: [makeCustomer({ _id: "customers:1" })],
+      initialPlans: [PLAN],
+      initialPromos: over.promos ?? [promoRow()],
+    });
+  }
+
+  it("stamps the plan and the promotion on the contract", async () => {
+    const bag = world();
+    const result = (await run(
+      bag.ctx,
+      saleArgs({
+        paymentPlanId: "paymentPlans:cash",
+        promoId: "promos:allsouls",
+      }),
+    )) as { contractId: string };
+
+    const contract = bag.contracts.get(result.contractId) as unknown as Record<
+      string,
+      unknown
+    >;
+    expect(contract["paymentPlanId"]).toBe("paymentPlans:cash");
+    expect(contract["promoId"]).toBe("promos:allsouls");
+  });
+
+  it("denormalises the code onto the contract", async () => {
+    // A promotion can be renamed or retired. The contract has to go on
+    // saying what the family was actually quoted.
+    const bag = world();
+    const result = (await run(
+      bag.ctx,
+      saleArgs({ promoId: "promos:allsouls" }),
+    )) as { contractId: string };
+    const contract = bag.contracts.get(result.contractId) as unknown as Record<
+      string,
+      unknown
+    >;
+    expect(contract["promoCode"]).toBe("UNDAS26");
+  });
+
+  it("claims the redemption in the same call that writes the contract", async () => {
+    const bag = world();
+    await run(bag.ctx, saleArgs({ promoId: "promos:allsouls" }));
+    expect(bag.promos.get("promos:allsouls")?.["redemptionCount"]).toBe(1);
+  });
+
+  it("does not touch the count when no promotion was used", async () => {
+    const bag = world();
+    await run(bag.ctx, saleArgs({ paymentPlanId: "paymentPlans:cash" }));
+    expect(bag.promos.get("promos:allsouls")?.["redemptionCount"]).toBe(0);
+  });
+
+  it("leaves a plain hand-priced sale entirely alone", async () => {
+    const bag = world();
+    const result = (await run(bag.ctx, saleArgs())) as { contractId: string };
+    const contract = bag.contracts.get(result.contractId) as unknown as Record<
+      string,
+      unknown
+    >;
+    expect(contract["paymentPlanId"]).toBeUndefined();
+    expect(contract["promoId"]).toBeUndefined();
+    expect(contract["promoCode"]).toBeUndefined();
+  });
+
+  it("rejects a plan id that no longer exists", async () => {
+    const bag = world();
+    const thrown = await run(
+      bag.ctx,
+      saleArgs({ paymentPlanId: "paymentPlans:ghost" }),
+    ).catch((e: unknown) => e);
+    expect(getCode(thrown)).toBe(ErrorCode.NOT_FOUND);
+  });
+
+  it("rejects a promotion id that no longer exists", async () => {
+    const bag = world();
+    const thrown = await run(
+      bag.ctx,
+      saleArgs({ promoId: "promos:ghost" }),
+    ).catch((e: unknown) => e);
+    expect(getCode(thrown)).toBe(ErrorCode.NOT_FOUND);
+  });
+
+  it("does NOT fail a sale whose promotion has run out", async () => {
+    // The price was agreed with the family at the desk and the
+    // paperwork may already be signed. Refusing here strands them over
+    // a counter we control. The count goes past its cap instead, which
+    // is visible on the admin screen — an overrun somebody can see
+    // beats a sale that dies at submit.
+    const bag = world({
+      promos: [promoRow({ maxRedemptions: 50, redemptionCount: 50 })],
+    });
+    const result = (await run(
+      bag.ctx,
+      saleArgs({ promoId: "promos:allsouls" }),
+    )) as { contractId: string };
+    expect(result.contractId).toBeDefined();
+    expect(bag.promos.get("promos:allsouls")?.["redemptionCount"]).toBe(51);
   });
 });

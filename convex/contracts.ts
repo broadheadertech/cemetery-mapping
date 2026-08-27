@@ -173,6 +173,17 @@ export interface RecordFullPaymentSaleArgs {
   // `available`. Single-lot semantics are unchanged when this field is
   // omitted.
   familyEstateId?: string;
+
+  /**
+   * The offer this was sold under, for the record.
+   *
+   * Ids, not terms — the server never takes a price from a plan. The
+   * figures still arrive as explicit centavo amounts above and are
+   * re-validated; these two say WHICH offer produced them, so the
+   * cemetery can ask later how many lots an offer actually moved.
+   */
+  paymentPlanId?: string;
+  promoId?: string;
 }
 
 /**
@@ -419,6 +430,72 @@ function makeContractNumber(now: number, lotCode: string): string {
  *   - `IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD` — programming
  *     bug; the same UUID was reused with a different financial intent.
  */
+/**
+ * Record which offer a sale was made under, and claim its redemption.
+ *
+ * Two jobs, together on purpose. The contract has to say what the
+ * family was quoted — "how many lots did the All Souls promo move" is
+ * not answerable from a discount figure alone — and a promotion capped
+ * at fifty lots has to stop at fifty. The count is incremented inside
+ * the sale mutation rather than anywhere else because Convex mutations
+ * are transactional: two concurrent sales cannot both read
+ * forty-nine and both proceed.
+ *
+ * A promotion that has run out does NOT fail the sale. The price was
+ * already agreed with the family at the desk and the paperwork may
+ * already be signed; refusing here would strand them over a counter we
+ * control. It is recorded as sold under that promotion and the count
+ * goes past its cap, which is visible on the admin screen — an overrun
+ * somebody can see beats a sale that dies at submit.
+ *
+ * `promoCode` is denormalised onto the contract deliberately: a
+ * promotion can be renamed or retired, and the contract must go on
+ * saying what the family was actually quoted.
+ */
+async function applyOffer(
+  ctx: MutationCtx,
+  args: {
+    paymentPlanId?: DataModel["paymentPlans"]["document"]["_id"];
+    promoId?: DataModel["promos"]["document"]["_id"];
+  },
+): Promise<{
+  paymentPlanId?: DataModel["paymentPlans"]["document"]["_id"];
+  promoId?: DataModel["promos"]["document"]["_id"];
+  promoCode?: string;
+}> {
+  const out: {
+    paymentPlanId?: DataModel["paymentPlans"]["document"]["_id"];
+    promoId?: DataModel["promos"]["document"]["_id"];
+    promoCode?: string;
+  } = {};
+
+  if (args.paymentPlanId !== undefined) {
+    const plan = await ctx.db.get(args.paymentPlanId);
+    if (plan === null) {
+      throwError(ErrorCode.NOT_FOUND, "That payment plan no longer exists.", {
+        paymentPlanId: args.paymentPlanId,
+      });
+    }
+    out.paymentPlanId = args.paymentPlanId;
+  }
+
+  if (args.promoId !== undefined) {
+    const promo = await ctx.db.get(args.promoId);
+    if (promo === null) {
+      throwError(ErrorCode.NOT_FOUND, "That promotion no longer exists.", {
+        promoId: args.promoId,
+      });
+    }
+    out.promoId = args.promoId;
+    if (promo.code !== undefined) out.promoCode = promo.code;
+    await ctx.db.patch(args.promoId, {
+      redemptionCount: promo.redemptionCount + 1,
+    });
+  }
+
+  return out;
+}
+
 export const recordFullPaymentSale = mutationGeneric({
   args: {
     lotId: v.id("lots"),
@@ -435,6 +512,11 @@ export const recordFullPaymentSale = mutationGeneric({
     // Story 3.8 rebuild (FR25): perpetual-care fee + reason are NO
     // LONGER accepted from the client. Server derives the fee from
     // `perpetualCarePolicy` + lot type.
+    // Which offer this was sold under. Optional: a sale can still be
+    // priced by hand, and every contract written before payment plans
+    // existed has neither.
+    paymentPlanId: v.optional(v.id("paymentPlans")),
+    promoId: v.optional(v.id("promos")),
     // Story 2.9 (FR15 brand-tier extension) — optional estate-mode FK.
     familyEstateId: v.optional(v.id("familyEstates")),
   },
@@ -673,6 +755,32 @@ export const recordFullPaymentSale = mutationGeneric({
       contractRow.familyEstateId =
         args.familyEstateId as unknown as DataModel["familyEstates"]["document"]["_id"];
     }
+    // The offer this was sold under, and the redemption claimed in the
+    // same transaction as the contract. Two concurrent sales against a
+    // fifty-lot promotion must not both read forty-nine and proceed.
+    // The arg surface types these as plain strings, matching the
+    // `familyEstateId` convention above; the cast is the same one.
+    const offer = await applyOffer(ctx, {
+      ...(args.paymentPlanId !== undefined
+        ? {
+            paymentPlanId:
+              args.paymentPlanId as unknown as DataModel["paymentPlans"]["document"]["_id"],
+          }
+        : {}),
+      ...(args.promoId !== undefined
+        ? {
+            promoId:
+              args.promoId as unknown as DataModel["promos"]["document"]["_id"],
+          }
+        : {}),
+    });
+    if (offer.paymentPlanId !== undefined) {
+      contractRow.paymentPlanId = offer.paymentPlanId;
+    }
+    if (offer.promoId !== undefined) contractRow.promoId = offer.promoId;
+    if (offer.promoCode !== undefined) {
+      contractRow.promoCode = offer.promoCode;
+    }
     const contractId = await ctx.db.insert("contracts", contractRow);
 
     // Step 5: Transition the lot from `available` to `sold`. The helper
@@ -869,6 +977,17 @@ export interface RecordInstallmentSaleArgs {
   // the same transaction as the canonical-anchor `lotId`. Validation
   // is identical.
   familyEstateId?: string;
+
+  /**
+   * The offer this was sold under, for the record.
+   *
+   * Ids, not terms — the server never takes a price from a plan. The
+   * figures still arrive as explicit centavo amounts above and are
+   * re-validated; these two say WHICH offer produced them, so the
+   * cemetery can ask later how many lots an offer actually moved.
+   */
+  paymentPlanId?: string;
+  promoId?: string;
 }
 
 /**
@@ -1014,6 +1133,11 @@ export const recordInstallmentSale = mutationGeneric({
     // Story 3.8 rebuild (FR25): perpetual-care fee + reason are NO
     // LONGER accepted from the client. Server derives the fee from
     // `perpetualCarePolicy` + lot type.
+    // Which offer this was sold under. Optional: a sale can still be
+    // priced by hand, and every contract written before payment plans
+    // existed has neither.
+    paymentPlanId: v.optional(v.id("paymentPlans")),
+    promoId: v.optional(v.id("promos")),
     // Story 2.9 (FR15 brand-tier extension) — optional estate-mode FK.
     familyEstateId: v.optional(v.id("familyEstates")),
   },
@@ -1540,6 +1664,32 @@ export const recordInstallmentSale = mutationGeneric({
     if (args.familyEstateId !== undefined) {
       contractRow.familyEstateId =
         args.familyEstateId as unknown as DataModel["familyEstates"]["document"]["_id"];
+    }
+    // The offer this was sold under, and the redemption claimed in the
+    // same transaction as the contract. Two concurrent sales against a
+    // fifty-lot promotion must not both read forty-nine and proceed.
+    // The arg surface types these as plain strings, matching the
+    // `familyEstateId` convention above; the cast is the same one.
+    const offer = await applyOffer(ctx, {
+      ...(args.paymentPlanId !== undefined
+        ? {
+            paymentPlanId:
+              args.paymentPlanId as unknown as DataModel["paymentPlans"]["document"]["_id"],
+          }
+        : {}),
+      ...(args.promoId !== undefined
+        ? {
+            promoId:
+              args.promoId as unknown as DataModel["promos"]["document"]["_id"],
+          }
+        : {}),
+    });
+    if (offer.paymentPlanId !== undefined) {
+      contractRow.paymentPlanId = offer.paymentPlanId;
+    }
+    if (offer.promoId !== undefined) contractRow.promoId = offer.promoId;
+    if (offer.promoCode !== undefined) {
+      contractRow.promoCode = offer.promoCode;
     }
     const contractId = await ctx.db.insert("contracts", contractRow);
 
