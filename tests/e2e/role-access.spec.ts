@@ -218,3 +218,74 @@ test.describe("the office desk flows", () => {
     });
   }
 });
+
+test.describe("office desk routes turn field workers away", () => {
+  requireAuthFixture();
+
+  /**
+   * The sweep that found these: twenty-five staff pages called queries
+   * gated `["admin", "office_staff"]`, nothing kept a field worker off
+   * them, and a rejected `useQuery` throws during render. Each one was
+   * the FORBIDDEN crash screen reported from a field account.
+   *
+   * They are gated in `isOfficeRoute` now. A redirect is the pass
+   * condition — landing on the page at all means the gate is gone,
+   * whether or not the page happens to render this second.
+   */
+  const officeRoutes = [
+    "/customers",
+    "/contracts",
+    "/payments",
+    "/receipts",
+    "/ar-aging",
+    "/expenses",
+    "/family-estates",
+    "/follow-ups",
+    "/enquiries",
+    "/sales",
+    "/phase-planning",
+    "/analytics",
+    "/interments",
+  ];
+
+  for (const route of officeRoutes) {
+    test(`a field worker is redirected off ${route}`, async ({
+      page,
+      signInAs,
+    }) => {
+      const errors = watchForCrashes(page);
+      await signInAs("field");
+      await openSettled(page, route);
+
+      await expect(page).not.toHaveURL(new RegExp(`${route}/?$`));
+      await expectNotCrashed(page);
+      const forbidden = errors.filter((e) => /FORBIDDEN/i.test(e));
+      expect(forbidden, forbidden.join("\n")).toEqual([]);
+      expect(errors, errors.join("\n")).toEqual([]);
+    });
+  }
+
+  test("office staff still reach them", async ({ page, signInAs }) => {
+    // The gate has to keep the right people IN. A rule that redirects
+    // everyone passes every test above and breaks the cemetery.
+    await signInAs("office");
+    for (const route of ["/customers", "/payments"]) {
+      await openSettled(page, route);
+      await expect(page).toHaveURL(new RegExp(`${route}/?$`));
+      await expectNotCrashed(page);
+    }
+  });
+
+  test("a field worker keeps their own interment screens", async ({
+    page,
+    signInAs,
+  }) => {
+    // `/interments` is gated by exact path precisely so this branch
+    // stays open. Sweeping the whole family would have taken away the
+    // screen a field worker opens every morning.
+    await signInAs("field");
+    await openSettled(page, "/interments/today");
+    await expect(page).toHaveURL(/\/interments\/today\/?$/);
+    await expectNotCrashed(page);
+  });
+});

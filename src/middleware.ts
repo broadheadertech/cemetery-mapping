@@ -80,6 +80,29 @@ const isStaffRoute = createRouteMatcher([
   "/phase-planning/(.*)",
   "/phase-3d",
   "/phase-3d/(.*)",
+  // Families that were never listed. Falling through meant an
+  // unauthenticated visitor was NOT sent to /login and a customer was
+  // NOT bounced to /portal — they reached the page, whose first query
+  // then rejected. Listing them is the same fix as everything else
+  // here: decide at the edge, not in the render.
+  "/analytics",
+  "/analytics/(.*)",
+  "/ceremonies",
+  "/ceremonies/(.*)",
+  "/enquiries",
+  "/enquiries/(.*)",
+  "/family-estates",
+  "/family-estates/(.*)",
+  "/flagged-followups",
+  "/flagged-followups/(.*)",
+  "/follow-ups",
+  "/follow-ups/(.*)",
+  "/interments",
+  "/interments/(.*)",
+  "/map",
+  "/map/(.*)",
+  "/receipts",
+  "/receipts/(.*)",
 ]);
 // `/reports` is admin-only in the sidebar but was never enforced, so a
 // non-admin who typed the URL reached a page whose queries are
@@ -91,6 +114,58 @@ const isAdminRoute = createRouteMatcher([
   "/admin/(.*)",
   "/reports",
   "/reports/(.*)",
+]);
+/**
+ * Office-desk routes a field worker must not reach.
+ *
+ * Same failure as `/reports` above, found by sweeping every page in
+ * `src/` against the roles its queries demand: twenty-five staff pages
+ * call queries gated `["admin", "office_staff"]`, nothing stopped a
+ * signed-in field worker opening them, and a rejected `useQuery` throws
+ * during render rather than resolving to `undefined`. Every one of them
+ * was a FORBIDDEN crash screen — the same one reported from a field
+ * account in production.
+ *
+ * Gated here rather than on each page for the reason the `/reports`
+ * comment gives: one edge rule beats twenty-five hand-written skip
+ * gates that have to be remembered again on every new page.
+ *
+ * `/interments` is deliberately NOT listed as a family. Field workers
+ * live in that branch — `/interments/today` is their working screen,
+ * and `/interments/[id]` and its completion flow are theirs too. Only
+ * the office index and the desk flow are listed, by exact path. The
+ * same is true of `/lots`: field workers use it, so `/lots/suggest`
+ * carries its own gate in the page.
+ */
+const isOfficeRoute = createRouteMatcher([
+  "/ar-aging",
+  "/ar-aging/(.*)",
+  "/contracts",
+  "/contracts/(.*)",
+  "/customers",
+  "/customers/(.*)",
+  "/enquiries",
+  "/enquiries/(.*)",
+  "/expenses",
+  "/expenses/(.*)",
+  "/family-estates",
+  "/family-estates/(.*)",
+  "/flagged-followups",
+  "/flagged-followups/(.*)",
+  "/follow-ups",
+  "/follow-ups/(.*)",
+  "/payments",
+  "/payments/(.*)",
+  "/receipts",
+  "/receipts/(.*)",
+  "/sales",
+  "/sales/(.*)",
+  "/phase-planning",
+  "/phase-planning/(.*)",
+  "/analytics",
+  "/analytics/(.*)",
+  "/interments",
+  "/interments/quick",
 ]);
 const isCustomerRoute = createRouteMatcher(["/portal", "/portal/(.*)"]);
 
@@ -287,6 +362,17 @@ export default convexAuthNextjsMiddleware(async (request, { convexAuth }) => {
   // that the page exists to non-admins). Customer was already handled
   // above; this branch covers office_staff / field_worker.
   if (isAdminRoute(request) && !roles.includes("admin")) {
+    return nextjsMiddlewareRedirect(request, "/dashboard");
+  }
+
+  // Office desk routes → /dashboard for a field worker. Their own
+  // screens (today's interments, the lot map, condition logging) are
+  // all reachable from there.
+  if (
+    isOfficeRoute(request) &&
+    !roles.includes("admin") &&
+    !roles.includes("office_staff")
+  ) {
     return nextjsMiddlewareRedirect(request, "/dashboard");
   }
 

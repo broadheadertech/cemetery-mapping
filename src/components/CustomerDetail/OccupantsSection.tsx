@@ -17,6 +17,10 @@
  * documents / contracts. Story 6.8 introduces the card lazily here so
  * the Plaque action has a natural home; future Story 2.6 follow-ups
  * may relocate the card or enrich it with relationship metadata.
+ *
+ * @gated-route-only — renders only inside `CustomerDetail`, which
+ * mounts on `/customers/[customerId]`; middleware keeps field workers
+ * off the `/customers` family.
  */
 
 import Link from "next/link";

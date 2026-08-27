@@ -16,6 +16,10 @@
  * deleted, the query returns `lotCode: "[retired]"` — see the
  * soft-foreign-key note in `convex/ownerships.ts`. We still render the
  * row (the customer's history matters) but without a clickable link.
+ *
+ * @gated-route-only — renders only inside `CustomerDetail`, which
+ * mounts on `/customers/[customerId]`; middleware keeps field workers
+ * off the `/customers` family.
  */
 
 import Link from "next/link";

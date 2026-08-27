@@ -50,6 +50,9 @@
  *     detail page. The reactive `useQuery(listContractPayments)` on
  *     that page surfaces the new payment row with a 600ms amber flash
  *     when Story 3.6's contract detail timeline ships.
+ *
+ * @gated-route-only — mounts on `/payments/new`; middleware keeps
+ * field workers off the `/payments` family.
  */
 
 import { useEffect, useMemo, useState } from "react";
