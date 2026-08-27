@@ -208,6 +208,16 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
         icon: Boxes,
         requiredRoles: ["admin", "office_staff"],
       },
+      {
+        // Inventory analytics — the sales rate measured from contracts,
+        // and the runway that falls out of it. Sits beside Phase
+        // Planning deliberately: the plan's absorption figure is typed
+        // in by hand, and this is where it gets checked.
+        href: "/analytics",
+        label: "Inventory",
+        icon: LineChart,
+        requiredRoles: ["admin", "office_staff"],
+      },
     ],
   },
   {

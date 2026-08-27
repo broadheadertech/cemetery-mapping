@@ -269,7 +269,7 @@ test.describe("office desk routes turn field workers away", () => {
     // The gate has to keep the right people IN. A rule that redirects
     // everyone passes every test above and breaks the cemetery.
     await signInAs("office");
-    for (const route of ["/customers", "/payments"]) {
+    for (const route of ["/customers", "/payments", "/analytics"]) {
       await openSettled(page, route);
       await expect(page).toHaveURL(new RegExp(`${route}/?$`));
       await expectNotCrashed(page);
