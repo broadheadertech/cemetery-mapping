@@ -21,6 +21,18 @@
  * Pure arithmetic — no database, no clock. Everything is passed in.
  */
 
+/**
+ * What a sale nobody sold is credited to.
+ *
+ * The platform is an agent. Every sale is attributed to somebody — a
+ * named agent, or this — so "sales by agent" adds up to sales and a gap
+ * in the report means a gap in the data rather than a category nobody
+ * named.
+ *
+ * It earns nothing. A park cannot owe itself a commission.
+ */
+export const PLATFORM_AGENT_NAME = "Online transaction";
+
 /** Share of the price that must be collected before commission is due. */
 export const DEFAULT_EARNED_AT_PERCENT = 20;
 

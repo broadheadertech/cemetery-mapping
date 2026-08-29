@@ -24,6 +24,7 @@ vi.mock("@convex-dev/auth/server", () => ({
 }));
 
 import { getAuthSessionId, getAuthUserId } from "@convex-dev/auth/server";
+import { PLATFORM_AGENT_NAME } from "../../../convex/lib/commission";
 import {
   createSalesAgent,
   listCommissions,
@@ -31,6 +32,7 @@ import {
   markCommissionPaid,
   setCommissionPolicy,
   setSalesAgentRetired,
+  updateSalesAgent,
 } from "../../../convex/salesAgents";
 
 const mockedGetAuthUserId = vi.mocked(getAuthUserId);
@@ -182,6 +184,7 @@ function handlerOf(fn: any): (ctx: unknown, args: unknown) => Promise<any> {
 const runCreate = handlerOf(createSalesAgent);
 const runList = handlerOf(listSalesAgents);
 const runRetire = handlerOf(setSalesAgentRetired);
+const runUpdate = handlerOf(updateSalesAgent);
 const runPolicy = handlerOf(setCommissionPolicy);
 const runLedger = handlerOf(listCommissions);
 const runPay = handlerOf(markCommissionPaid);
@@ -586,5 +589,148 @@ describe("the policy", () => {
     const list = await runList(ctx, {});
     expect(list.defaultCommissionPercent).toBe(8);
     expect(list.earnedAtPercent).toBe(30);
+  });
+});
+
+// --- the platform as an agent ------------------------------------------
+
+describe("the park's own agent row", () => {
+  function platform(over: Row = {}): Row {
+    return agent({
+      _id: "salesAgents:platform",
+      fullName: PLATFORM_AGENT_NAME,
+      fullNameLowercased: PLATFORM_AGENT_NAME.toLowerCase(),
+      commissionPercent: 0,
+      isSystem: true,
+      ...over,
+    });
+  }
+
+  it("is named for what it is", () => {
+    // It appears in "sales by agent" beside real people, so it has to
+    // read as a category and not as a person.
+    expect(PLATFORM_AGENT_NAME).toBe("Online transaction");
+  });
+
+  it("CANNOT be retired", async () => {
+    // Retiring it would leave every online sale unattributed, which is
+    // the gap this whole change exists to close.
+    const { ctx, tables } = makeCtx({
+      roles: ["admin"],
+      tables: { salesAgents: [platform()] },
+    });
+    const code = await codeOf(() =>
+      runRetire(ctx, { agentId: "salesAgents:platform", isRetired: true }),
+    );
+    expect(code).toBe(ErrorCode.INVARIANT_VIOLATION);
+    expect(tables.salesAgents[0]?.["isRetired"]).toBe(false);
+  });
+
+  it("CANNOT be given a rate", async () => {
+    // Refused rather than clamped. A house agent quietly carrying 40%
+    // would have the park reporting money it owes to nobody.
+    const { ctx, tables } = makeCtx({
+      roles: ["admin"],
+      tables: { salesAgents: [platform()] },
+    });
+    const code = await codeOf(() =>
+      runUpdate(ctx, {
+        agentId: "salesAgents:platform",
+        commissionPercent: 40,
+      }),
+    );
+    expect(code).toBe(ErrorCode.INVARIANT_VIOLATION);
+    expect(tables.salesAgents[0]?.["commissionPercent"]).toBe(0);
+  });
+
+  it("cannot be renamed either", async () => {
+    const { ctx } = makeCtx({
+      roles: ["admin"],
+      tables: { salesAgents: [platform()] },
+    });
+    expect(
+      await codeOf(() =>
+        runUpdate(ctx, { agentId: "salesAgents:platform", fullName: "Bob" }),
+      ),
+    ).toBe(ErrorCode.INVARIANT_VIOLATION);
+  });
+
+  it("says why, in terms somebody can act on", async () => {
+    const { ctx } = makeCtx({
+      roles: ["admin"],
+      tables: { salesAgents: [platform()] },
+    });
+    let thrown: unknown;
+    try {
+      await runRetire(ctx, {
+        agentId: "salesAgents:platform",
+        isRetired: true,
+      });
+    } catch (e) {
+      thrown = e;
+    }
+    expect(String(thrown)).toContain("the park itself");
+  });
+
+  it("appears in the pick list as an ordinary option", async () => {
+    // The desk should be able to mark a sale as having come through the
+    // platform, not only fall into it by leaving the field blank.
+    const { ctx } = makeCtx({
+      roles: ["office_staff"],
+      tables: { salesAgents: [platform(), agent()] },
+    });
+    const list = await runList(ctx, {});
+    const found = list.agents.find(
+      (a: { fullName: string }) => a.fullName === PLATFORM_AGENT_NAME,
+    );
+    expect(found).toBeDefined();
+    expect(found.isSystem).toBe(true);
+  });
+
+  it("marks a real agent as not a system row", async () => {
+    const { ctx } = makeCtx({
+      roles: ["office_staff"],
+      tables: { salesAgents: [agent()] },
+    });
+    expect((await runList(ctx, {})).agents[0].isSystem).toBe(false);
+  });
+
+  it("stays out of the payables ledger", async () => {
+    // Every sale is attributed now, most of them to the platform. A
+    // commission of nothing is not a commission, and letting those
+    // through would bury the real payables in the park's own sales.
+    const { ctx } = world({
+      salesAgents: [platform()],
+      contracts: [
+        contract({
+          salesAgentId: "salesAgents:platform",
+          commissionPercent: 0,
+          commissionCents: 0,
+          state: "paid_in_full",
+        }),
+      ],
+    });
+    const ledger = await runLedger(ctx, {});
+    expect(ledger.rows).toHaveLength(0);
+    expect(ledger.totalDueCents).toBe(0);
+  });
+
+  it("still leaves a real agent's commission in the ledger", async () => {
+    // Guards the exclusion above from swallowing everything.
+    const { ctx } = world({
+      salesAgents: [platform(), agent()],
+      contracts: [
+        contract({
+          _id: "contracts:online",
+          salesAgentId: "salesAgents:platform",
+          commissionCents: 0,
+          state: "paid_in_full",
+        }),
+        contract({ _id: "contracts:c1", state: "paid_in_full" }),
+      ],
+    });
+    const ledger = await runLedger(ctx, {});
+    expect(ledger.rows).toHaveLength(1);
+    expect(ledger.rows[0].agentName).toBe("Marisol Cruz");
   });
 });

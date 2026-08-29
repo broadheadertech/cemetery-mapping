@@ -83,6 +83,7 @@ import {
   resolveCommissionPercent,
 } from "./lib/commission";
 import { readAppSettings } from "./reports";
+import { ensurePlatformAgent } from "./salesAgents";
 import { generateInstallmentSchedule } from "./lib/installmentSchedule";
 import {
   computePerpetualCareForSale,
@@ -511,9 +512,11 @@ async function applyOffer(
 /**
  * Who gets the commission on this sale, and how much.
  *
- * Returns `null` when no agent was named — most sales at a small park
- * are walk-ins, and a commission of zero attached to nobody is noise in
- * every report that reads it.
+ * Every sale is attributed. A sale with no named agent is credited to
+ * the platform — the park itself — rather than to nobody, so "sales by
+ * agent" adds up to sales and a gap in that report means a gap in the
+ * data rather than a category nobody named. The platform earns nothing;
+ * a park cannot owe itself a commission.
  *
  * The RATE is resolved server-side from the desk figure, the agent's
  * own rate, then the park default, in that order. The client sends at
@@ -522,6 +525,7 @@ async function applyOffer(
  */
 async function resolveCommission(
   ctx: MutationCtx,
+  actingUserId: DataModel["users"]["document"]["_id"],
   args: {
     salesAgentId?: DataModel["salesAgents"]["document"]["_id"];
     explicitPercent?: number;
@@ -531,8 +535,15 @@ async function resolveCommission(
   salesAgentId: DataModel["salesAgents"]["document"]["_id"];
   percent: number;
   cents: number;
-} | null> {
-  if (args.salesAgentId === undefined) return null;
+}> {
+  // No agent named means the platform sold it, not that nobody did.
+  if (args.salesAgentId === undefined) {
+    return {
+      salesAgentId: await ensurePlatformAgent(ctx, actingUserId),
+      percent: 0,
+      cents: 0,
+    };
+  }
 
   const agent = await ctx.db.get(args.salesAgentId);
   if (agent === null) {
@@ -540,6 +551,14 @@ async function resolveCommission(
       salesAgentId: args.salesAgentId,
     });
   }
+
+  // The platform, picked deliberately from the list. Still the park,
+  // still earns nothing. Checked here as well as on the row because a
+  // hand-made request can name any id it likes.
+  if (agent.isSystem === true) {
+    return { salesAgentId: args.salesAgentId, percent: 0, cents: 0 };
+  }
+
   if (agent.isRetired) {
     throwError(
       ErrorCode.VALIDATION,
@@ -858,7 +877,7 @@ export const recordFullPaymentSale = mutationGeneric({
     // Commission, frozen at the sale. Deriving it later from the
     // agent's current rate would rewrite what an agent was promised
     // every time the park adjusted its rates.
-    const commission = await resolveCommission(ctx, {
+    const commission = await resolveCommission(ctx, auth.userId, {
       ...(args.salesAgentId !== undefined
         ? {
             salesAgentId:
@@ -870,11 +889,9 @@ export const recordFullPaymentSale = mutationGeneric({
         : {}),
       contractTotalCents: contractRow.totalPriceCents,
     });
-    if (commission !== null) {
-      contractRow.salesAgentId = commission.salesAgentId;
-      contractRow.commissionPercent = commission.percent;
-      contractRow.commissionCents = commission.cents;
-    }
+    contractRow.salesAgentId = commission.salesAgentId;
+    contractRow.commissionPercent = commission.percent;
+    contractRow.commissionCents = commission.cents;
     const contractId = await ctx.db.insert("contracts", contractRow);
 
     // Step 5: Transition the lot from `available` to `sold`. The helper
@@ -1799,7 +1816,7 @@ export const recordInstallmentSale = mutationGeneric({
     // Commission, frozen at the sale. Deriving it later from the
     // agent's current rate would rewrite what an agent was promised
     // every time the park adjusted its rates.
-    const commission = await resolveCommission(ctx, {
+    const commission = await resolveCommission(ctx, auth.userId, {
       ...(args.salesAgentId !== undefined
         ? {
             salesAgentId:
@@ -1811,11 +1828,9 @@ export const recordInstallmentSale = mutationGeneric({
         : {}),
       contractTotalCents: contractRow.totalPriceCents,
     });
-    if (commission !== null) {
-      contractRow.salesAgentId = commission.salesAgentId;
-      contractRow.commissionPercent = commission.percent;
-      contractRow.commissionCents = commission.cents;
-    }
+    contractRow.salesAgentId = commission.salesAgentId;
+    contractRow.commissionPercent = commission.percent;
+    contractRow.commissionCents = commission.cents;
     const contractId = await ctx.db.insert("contracts", contractRow);
 
     // Step 6: Transition the lot from `available` to `sold`. A concurrent

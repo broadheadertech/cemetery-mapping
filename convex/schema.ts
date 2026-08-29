@@ -2992,12 +2992,27 @@ export default defineSchema({
     email: v.optional(v.string()),
     commissionPercent: v.optional(v.number()),
     notes: v.optional(v.string()),
+    /**
+     * The park itself, standing in for a sale nobody sold.
+     *
+     * Every sale is attributed to somebody: a named agent, or the
+     * platform. There is no such thing as an unattributed sale, so
+     * "sales by agent" adds up to sales, and a gap in the report means
+     * a gap in the data rather than a category nobody named.
+     *
+     * It earns nothing — the park cannot owe itself a commission — and
+     * it cannot be retired or given a rate. Those are refused rather
+     * than clamped, because a house agent quietly carrying 40% would
+     * have the park reporting money it owes to nobody.
+     */
+    isSystem: v.optional(v.boolean()),
     isRetired: v.boolean(),
     createdAt: v.number(),
     createdByUserId: v.id("users"),
     updatedAt: v.number(),
     updatedByUserId: v.optional(v.id("users")),
   })
+    .index("by_isSystem", ["isSystem"])
     .index("by_fullName_lowercased", ["fullNameLowercased"])
     .index("by_code", ["code"])
     .index("by_isRetired", ["isRetired"]),

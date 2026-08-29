@@ -36,6 +36,7 @@ import {
   commissionStatus,
   MAX_COMMISSION_PERCENT,
   normaliseCommissionPercent,
+  PLATFORM_AGENT_NAME,
   type CommissionState,
 } from "./lib/commission";
 import { readAppSettings } from "./reports";
@@ -59,6 +60,8 @@ export interface AgentRow {
   /** This agent's own rate. Absent means the park default applies. */
   commissionPercent?: number;
   notes?: string;
+  /** The park itself. Earns nothing, cannot be retired or rated. */
+  isSystem: boolean;
   isRetired: boolean;
 }
 
@@ -208,6 +211,8 @@ export const updateSalesAgent = mutationGeneric({
       });
     }
 
+    assertNotSystem(existing, "changed");
+
     const patch: Record<string, unknown> = {
       updatedAt: Date.now(),
       updatedByUserId: auth.userId,
@@ -272,6 +277,8 @@ export const setSalesAgentRetired = mutationGeneric({
         agentId: args.agentId,
       });
     }
+
+    assertNotSystem(existing, "retired");
 
     await ctx.db.patch(args.agentId, {
       isRetired: args.isRetired,
@@ -412,6 +419,11 @@ export const listCommissions = queryGeneric({
 
     for (const c of contracts) {
       if (c.salesAgentId === undefined) continue;
+      // Every sale is attributed now, most of them to the platform. A
+      // commission of nothing is not a commission, and letting those
+      // through would bury the handful of real payables in a list of
+      // the park's own sales.
+      if ((c.commissionCents ?? 0) <= 0) continue;
       if (args.agentId !== undefined && c.salesAgentId !== args.agentId) {
         continue;
       }
@@ -591,10 +603,65 @@ async function sumCollected(
   return contract.state === "paid_in_full" ? contract.totalPriceCents : 0;
 }
 
+/**
+ * The park's own agent row, made if it is not there yet.
+ *
+ * Created on demand rather than seeded, so a deployment that never
+ * records a sale never grows a row it does not need, and an existing
+ * park gets one the first time it sells something.
+ *
+ * Callers must be inside a mutation — a query cannot insert, which is
+ * why attribution happens in the sale path and not in the list.
+ */
+export async function ensurePlatformAgent(
+  ctx: MutationCtx,
+  createdByUserId: DataModel["users"]["document"]["_id"],
+): Promise<AgentId> {
+  const existing = await ctx.db
+    .query("salesAgents")
+    .withIndex("by_isSystem", (q) => q.eq("isSystem", true))
+    .first();
+  if (existing !== null) return existing._id;
+
+  const now = Date.now();
+  return await ctx.db.insert("salesAgents", {
+    fullName: PLATFORM_AGENT_NAME,
+    fullNameLowercased: PLATFORM_AGENT_NAME.toLowerCase(),
+    // Explicitly zero, not absent. Absent would fall through to the
+    // park's default rate and have the park owing itself money.
+    commissionPercent: 0,
+    isSystem: true,
+    isRetired: false,
+    createdAt: now,
+    createdByUserId,
+    updatedAt: now,
+  } as never);
+}
+
+/**
+ * Refuse to change the park's own agent row.
+ *
+ * Clamping would be quieter and worse: a house agent silently carrying
+ * a rate would have the park reporting money it owes to nobody, and
+ * retiring it would leave every online sale unattributed.
+ */
+function assertNotSystem(
+  agent: { isSystem?: boolean; fullName: string },
+  verb: string,
+): void {
+  if (agent.isSystem !== true) return;
+  throwError(
+    ErrorCode.INVARIANT_VIOLATION,
+    `"${agent.fullName}" is the park itself, not a person. It cannot be ${verb} — it is what a sale with no agent is credited to, and it never earns a commission.`,
+    { kind: "SYSTEM_AGENT_IMMUTABLE" },
+  );
+}
+
 function toAgentRow(row: DataModel["salesAgents"]["document"]): AgentRow {
   const out: AgentRow = {
     _id: row._id,
     fullName: row.fullName,
+    isSystem: row.isSystem === true,
     isRetired: row.isRetired,
   };
   if (row.code !== undefined) out.code = row.code;
