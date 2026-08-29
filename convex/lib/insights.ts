@@ -37,7 +37,11 @@ export type InsightLevel =
 
 export type Confidence = "observed" | "indicative" | "speculative";
 
-export type InsightTopic = "agents" | "phases" | "discounts";
+export type InsightTopic =
+  | "agents"
+  | "phases"
+  | "discounts"
+  | "collections";
 
 export interface Insight {
   level: InsightLevel;
@@ -896,4 +900,272 @@ function prescribeForDiscounts(
 function rateOf(listCents: number, discountCents: number): number {
   if (listCents <= 0) return 0;
   return (discountCents / listCents) * 100;
+}
+
+// --- collections -------------------------------------------------------
+
+/**
+ * Whether the families an agent sold to actually pay.
+ *
+ * The measure is deliberately age-neutral: of the money ALREADY DUE on
+ * a book, how much has arrived. Comparing raw "share collected" would
+ * punish whoever sold most recently — a contract signed last month has
+ * collected less than one signed two years ago, and that is the
+ * calendar rather than the agent.
+ *
+ * Cash sales are counted but never rated. They collect in full by
+ * construction, so an agent who only sells cash would show a perfect
+ * record for doing something that carries no collection risk at all,
+ * and would sit above the person carrying the park's whole instalment
+ * book.
+ *
+ * This is the number that a commission ranking hides. An agent can sell
+ * ₱2M and be the park's most expensive employee if none of it arrives.
+ */
+export interface CollectionLine {
+  key: string;
+  label: string;
+  /** Instalment contracts — the only ones that can be rated. */
+  termContracts: number;
+  /** Paid-in-full-at-signing sales. Counted, never rated. */
+  cashContracts: number;
+  /** Principal whose due date has passed. */
+  dueToDateCents: number;
+  /** Of that, what arrived. */
+  paidToDateCents: number;
+  /** Contracts carrying at least one overdue instalment. */
+  behindContracts: number;
+  /** Contracts the park has marked in default. */
+  defaultedContracts: number;
+  /** Still owed across the whole book, due or not. */
+  outstandingCents: number;
+}
+
+export interface CollectionFacts {
+  windowMonths: number;
+  byAgent: CollectionLine[];
+  /** Everything, as one line. */
+  overall: CollectionLine;
+}
+
+/** Below this many instalment contracts, a book cannot be judged. */
+export const MIN_TERM_CONTRACTS_TO_JUDGE = 5;
+
+/**
+ * Below this much due, a rate is noise.
+ *
+ * A book of twenty contracts signed last month has almost nothing due
+ * yet; dividing by that produces a number that swings on one payment.
+ */
+export const MIN_DUE_TO_RATE_CENTS = 50_000_00;
+
+export function analyseCollections(facts: CollectionFacts): Insight[] {
+  const out: Insight[] = [];
+  const all = facts.overall;
+
+  if (all.termContracts === 0) {
+    return [
+      {
+        level: "descriptive",
+        topic: "collections",
+        headline: "Every sale was paid in full at signing.",
+        detail:
+          "There is no instalment book to collect on, so there is nothing here to measure. This section fills in once the park sells on terms.",
+        confidence: "observed",
+        basis: "Contracts with an instalment schedule.",
+      },
+    ];
+  }
+
+  const rate = collectionRate(all);
+  out.push({
+    level: "descriptive",
+    topic: "collections",
+    headline:
+      all.dueToDateCents < MIN_DUE_TO_RATE_CENTS
+        ? "The instalment book is too young to rate yet."
+        : `${round1(rate)}% of the money already due has arrived.`,
+    detail:
+      all.dueToDateCents < MIN_DUE_TO_RATE_CENTS
+        ? `${all.termContracts} contracts are on terms, but little has fallen due so far. A rate off this would swing on a single payment.`
+        : `${peso(all.paidToDateCents)} collected against ${peso(all.dueToDateCents)} due. ${all.behindContracts} of ${all.termContracts} contracts are behind, and ${all.defaultedContracts} ${all.defaultedContracts === 1 ? "is" : "are"} in default. ${peso(all.outstandingCents)} is still owed in total.`,
+    confidence: "observed",
+    basis:
+      "Instalments whose due date has passed, against what was paid on them.",
+  });
+
+  if (all.dueToDateCents < MIN_DUE_TO_RATE_CENTS) return out;
+
+  out.push(...diagnoseCollections(facts));
+  out.push(...projectCollections(all));
+  out.push(...prescribeForCollections(facts));
+
+  return out;
+}
+
+function diagnoseCollections(facts: CollectionFacts): Insight[] {
+  const out: Insight[] = [];
+
+  const judgeable = facts.byAgent.filter(
+    (a) =>
+      a.termContracts >= MIN_TERM_CONTRACTS_TO_JUDGE &&
+      a.dueToDateCents >= MIN_DUE_TO_RATE_CENTS,
+  );
+
+  // Somebody selling only cash is not a collection story either way.
+  const cashOnly = facts.byAgent.filter(
+    (a) => a.termContracts === 0 && a.cashContracts > 0,
+  );
+  if (cashOnly.length > 0) {
+    out.push({
+      level: "diagnostic",
+      topic: "collections",
+      headline: `${cashOnly.map((a) => a.label).join(", ")} sell${cashOnly.length === 1 ? "s" : ""} for cash only.`,
+      detail:
+        "Those books collect in full by construction and are left out of the rating below. Rating them would put a perfect record against somebody carrying no collection risk, above whoever is carrying the park's instalment book.",
+      confidence: "observed",
+      basis: "Sellers with no instalment contracts.",
+    });
+  }
+
+  if (judgeable.length < 2) {
+    out.push({
+      level: "diagnostic",
+      topic: "collections",
+      headline: "Not enough of a book per seller to compare collection.",
+      detail: `Judging a book needs at least ${MIN_TERM_CONTRACTS_TO_JUDGE} instalment contracts with real money fallen due. Below that one family's arrears is the whole picture, and this is a report that reflects on somebody's judgement about who to sell to.`,
+      confidence: "observed",
+      basis: `${facts.byAgent.length} sellers, ${judgeable.length} with enough of a book to rate.`,
+    });
+    return out;
+  }
+
+  const ranked = [...judgeable].sort(
+    (a, b) => collectionRate(b) - collectionRate(a),
+  );
+  const best = ranked[0]!;
+  const worst = ranked[ranked.length - 1]!;
+  const gap = collectionRate(best) - collectionRate(worst);
+
+  if (gap >= 10) {
+    out.push({
+      level: "diagnostic",
+      topic: "collections",
+      headline: `${worst.label}'s book collects worst — ${round1(collectionRate(worst))}% against ${best.label}'s ${round1(collectionRate(best))}%.`,
+      detail: `${worst.behindContracts} of their ${worst.termContracts} contracts are behind, and ${peso(worst.outstandingCents)} is still owed on them. Selling and collecting are different skills, and a gap this size is usually about who was sold to rather than about effort — which is a question worth asking before it is an accusation.`,
+      confidence: "indicative",
+      basis: "Money paid against money due, per seller, ignoring what is not due yet.",
+    });
+  } else {
+    out.push({
+      level: "diagnostic",
+      topic: "collections",
+      headline: "Every book collects about as well as every other.",
+      detail:
+        "No seller's customers pay noticeably worse. Whatever arrears exist are spread across the park rather than concentrated, which points at terms or at the families the park attracts rather than at anybody's judgement.",
+      confidence: "indicative",
+      basis: "Collection rates within ten points of each other across sellers.",
+    });
+  }
+
+  const defaulters = judgeable.filter(
+    (a) => a.defaultedContracts / Math.max(1, a.termContracts) >= 0.2,
+  );
+  if (defaulters.length > 0) {
+    const a = defaulters[0]!;
+    out.push({
+      level: "diagnostic",
+      topic: "collections",
+      headline: `A fifth of ${a.label}'s book has gone into default.`,
+      detail: `${a.defaultedContracts} of ${a.termContracts}. A commission was paid on each of those once the family passed the collection threshold, and the lot has to be sold again — the sale cost the park twice.`,
+      confidence: "indicative",
+      basis: "Contracts marked in default, per seller.",
+    });
+  }
+
+  return out;
+}
+
+function projectCollections(all: CollectionLine): Insight[] {
+  const rate = collectionRate(all);
+  if (all.outstandingCents <= 0) return [];
+
+  const expected = Math.round((all.outstandingCents * rate) / 100);
+  const shortfall = all.outstandingCents - expected;
+
+  return [
+    {
+      level: "predictive",
+      topic: "collections",
+      headline: `Of ${peso(all.outstandingCents)} still owed, roughly ${peso(expected)} arrives at the current rate.`,
+      detail: `That leaves about ${peso(shortfall)} that would not. This applies today's collection rate to money that has not fallen due yet, which is the crudest possible assumption — families who are paying tend to keep paying and the real figure is usually better. Read it as the size of the exposure, not as a write-off.`,
+      confidence: "speculative",
+      basis: `${round1(rate)}% collection on money already due, applied to the whole outstanding book.`,
+    },
+  ];
+}
+
+function prescribeForCollections(facts: CollectionFacts): Insight[] {
+  const out: Insight[] = [];
+  const all = facts.overall;
+
+  if (all.behindContracts > 0) {
+    out.push({
+      level: "prescriptive",
+      topic: "collections",
+      headline: `${all.behindContracts} contract${all.behindContracts === 1 ? " is" : "s are"} behind — chase those first.`,
+      detail:
+        "Every one of them is money already earned and not collected, and on any of them past the commission threshold the park has already paid out on it. Working these pays the park and the agent at the same time.",
+      confidence: "observed",
+      basis: "Contracts with at least one overdue instalment.",
+      action: "Work the overdue list on receivables ageing.",
+    });
+  }
+
+  const judgeable = facts.byAgent.filter(
+    (a) =>
+      a.termContracts >= MIN_TERM_CONTRACTS_TO_JUDGE &&
+      a.dueToDateCents >= MIN_DUE_TO_RATE_CENTS,
+  );
+  if (judgeable.length >= 2) {
+    const ranked = [...judgeable].sort(
+      (a, b) => collectionRate(b) - collectionRate(a),
+    );
+    const worst = ranked[ranked.length - 1]!;
+    if (collectionRate(ranked[0]!) - collectionRate(worst) >= 10) {
+      out.push({
+        level: "prescriptive",
+        topic: "collections",
+        headline: `Look at what terms ${worst.label} is writing.`,
+        detail:
+          "A book that collects badly is often one sold on the longest terms with the smallest deposits, to families who were always going to struggle. Raising the deposit on the plans they reach for costs the park nothing and changes who signs.",
+        confidence: "indicative",
+        basis: "Collection rate against the rest of the park.",
+        action:
+          "Compare the deposit and term on their recent contracts with everyone else's.",
+      });
+    }
+  }
+
+  if (all.defaultedContracts > 0) {
+    out.push({
+      level: "prescriptive",
+      topic: "collections",
+      headline: `Check the commission threshold against ${all.defaultedContracts} default${all.defaultedContracts === 1 ? "" : "s"}.`,
+      detail:
+        "If commission was paid on contracts that later defaulted, the threshold is set too low for the kind of terms being written. Raising it delays every payout a little and stops the park paying for sales that come back.",
+      confidence: "indicative",
+      basis: "Contracts in default across the instalment book.",
+      action:
+        "Review the collection threshold under Sales agents against the default rate here.",
+    });
+  }
+
+  return out;
+}
+
+/** Paid against due, as a percentage. Only meaningful once money is due. */
+export function collectionRate(line: CollectionLine): number {
+  if (line.dueToDateCents <= 0) return 0;
+  return Math.min(100, (line.paidToDateCents / line.dueToDateCents) * 100);
 }

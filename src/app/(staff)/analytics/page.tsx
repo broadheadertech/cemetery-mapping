@@ -144,11 +144,31 @@ interface DiscountFacts {
   policyContracts: number;
 }
 
+interface CollectionLine {
+  key: string;
+  label: string;
+  termContracts: number;
+  cashContracts: number;
+  dueToDateCents: number;
+  paidToDateCents: number;
+  behindContracts: number;
+  defaultedContracts: number;
+  outstandingCents: number;
+}
+
+interface CollectionFacts {
+  windowMonths: number;
+  byAgent: CollectionLine[];
+  overall: CollectionLine;
+}
+
 interface AnalysisResult {
   agents: Insight[];
   phases: Insight[];
   discounts: Insight[];
   discountFacts: DiscountFacts;
+  collections: Insight[];
+  collectionFacts: CollectionFacts;
   agentFacts: AgentFacts[];
   phaseFacts: PhaseFacts[];
   windowMonths: number;
@@ -241,6 +261,14 @@ export default function AnalyticsPage(): ReactElement {
             insights={analysis.discounts}
           />
           <DiscountTable facts={analysis.discountFacts} />
+
+          <hr className="border-slate-200" />
+          <InsightPanel
+            title="Collections"
+            subtitle="Whether the families each seller signed up actually pay — measured against money already due, so a young book is not punished for being young."
+            insights={analysis.collections}
+          />
+          <CollectionTable facts={analysis.collectionFacts} />
         </>
       )}
 
@@ -736,6 +764,81 @@ function DiscountTable({ facts }: { facts: DiscountFacts }): ReactElement {
           again is usually a policy that belongs in the price book.
         </p>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The books behind the collection findings.
+ *
+ * Cash-only sellers are shown with a dash rather than a rate. A
+ * full-payment sale collects by construction, and printing "100%"
+ * beside somebody carrying no collection risk would rank them above
+ * whoever carries the park's instalment book.
+ */
+function CollectionTable({ facts }: { facts: CollectionFacts }): ReactElement {
+  const rows = facts.byAgent.filter(
+    (r) => r.termContracts > 0 || r.cashContracts > 0,
+  );
+  if (rows.length === 0) return <></>;
+
+  const rate = (r: CollectionLine): string =>
+    r.termContracts === 0
+      ? "— cash only"
+      : r.dueToDateCents <= 0
+        ? "— nothing due yet"
+        : `${(Math.round((r.paidToDateCents / r.dueToDateCents) * 1000) / 10).toFixed(1)}%`;
+
+  return (
+    <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+      <table className="w-full min-w-[680px] text-sm">
+        <thead>
+          <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wider text-slate-500">
+            <th className="px-4 py-2 font-medium">Seller</th>
+            <th className="px-4 py-2 text-right font-medium">On terms</th>
+            <th className="px-4 py-2 text-right font-medium">Cash</th>
+            <th className="px-4 py-2 text-right font-medium">Due so far</th>
+            <th className="px-4 py-2 text-right font-medium">Collected</th>
+            <th className="px-4 py-2 text-right font-medium">Behind</th>
+            <th className="px-4 py-2 text-right font-medium">Still owed</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {rows.map((r) => (
+            <tr key={r.key} data-testid="collection-row" className="text-slate-800">
+              <td className="px-4 py-2.5">{r.label}</td>
+              <td className="px-4 py-2.5 text-right tabular-nums">
+                {r.termContracts}
+              </td>
+              <td className="px-4 py-2.5 text-right tabular-nums text-slate-500">
+                {r.cashContracts}
+              </td>
+              <td className="px-4 py-2.5 text-right tabular-nums">
+                {r.dueToDateCents > 0 ? formatPeso(r.dueToDateCents) : "—"}
+              </td>
+              <td className="px-4 py-2.5 text-right tabular-nums">
+                {rate(r)}
+              </td>
+              <td className="px-4 py-2.5 text-right tabular-nums">
+                {r.behindContracts > 0 ? r.behindContracts : "—"}
+                {r.defaultedContracts > 0 && (
+                  <span className="ml-1 text-xs text-amber-700">
+                    ({r.defaultedContracts} in default)
+                  </span>
+                )}
+              </td>
+              <td className="px-4 py-2.5 text-right tabular-nums">
+                {formatPeso(r.outstandingCents)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">
+        &ldquo;Collected&rdquo; is money paid against money already due.
+        Instalments not yet due are not a collection failure, so a book
+        signed last month is not marked down for being young.
+      </p>
     </div>
   );
 }

@@ -39,9 +39,12 @@ import {
 import { computeTrailingMonthBounds } from "./trends";
 import {
   analyseAgents,
+  analyseCollections,
   analyseDiscounts,
   analysePhases,
   type AgentFacts,
+  type CollectionFacts,
+  type CollectionLine,
   type DiscountFacts,
   type DiscountLine,
   type Insight,
@@ -140,6 +143,8 @@ export interface AnalysisResult {
   phases: Insight[];
   discounts: Insight[];
   discountFacts: DiscountFacts;
+  collections: Insight[];
+  collectionFacts: CollectionFacts;
   /** The facts the agent findings were computed from, for the table. */
   agentFacts: AgentFacts[];
   /** The facts the phase findings were computed from, for the table. */
@@ -321,6 +326,21 @@ export const getInventoryAnalytics = queryGeneric({
     };
   },
 });
+
+/** An empty collection line, ready to accumulate into. */
+function blankCollection(key: string, label: string): CollectionLine {
+  return {
+    key,
+    label,
+    termContracts: 0,
+    cashContracts: 0,
+    dueToDateCents: 0,
+    paidToDateCents: 0,
+    behindContracts: 0,
+    defaultedContracts: 0,
+    outstandingCents: 0,
+  };
+}
 
 /** Accumulate one contract into a discount line. */
 function bump(
@@ -590,11 +610,94 @@ export const getAnalysis = queryGeneric({
       policyContracts,
     };
 
+    // --- collections --------------------------------------------------
+    //
+    // Age-neutral on purpose: money already DUE against money paid. A
+    // raw "share collected" would punish whoever sold most recently,
+    // because a contract signed last month has collected less than one
+    // signed two years ago — the calendar, not the agent.
+    //
+    // Cash sales are counted but never rated. They collect in full by
+    // construction, and rating them would put a perfect record against
+    // somebody carrying no collection risk at all.
+    const collectionLines = new Map<string, CollectionLine>();
+    const overall: CollectionLine = blankCollection("all", "All");
+
+    for (const c of contracts) {
+      if (c.state === "voided" || c.state === "cancelled") continue;
+
+      const key = c.salesAgentId ?? "none";
+      const label =
+        c.salesAgentId !== undefined
+          ? (byAgent.get(c.salesAgentId)?.name ?? "Unknown")
+          : "Not credited";
+      const line =
+        collectionLines.get(key) ?? blankCollection(key, label);
+
+      const installments = await ctx.db
+        .query("installments")
+        .withIndex("by_contract", (q) => q.eq("contractId", c._id))
+        .collect();
+
+      if (installments.length === 0) {
+        // Paid in full at signing. Counted, never rated.
+        line.cashContracts += 1;
+        overall.cashContracts += 1;
+        collectionLines.set(key, line);
+        continue;
+      }
+
+      line.termContracts += 1;
+      overall.termContracts += 1;
+
+      let due = 0;
+      let paid = 0;
+      let owed = 0;
+      let behind = false;
+      for (const i of installments) {
+        // A waived instalment is neither owed nor a collection failure.
+        if (i.status === "waived") continue;
+        owed += Math.max(0, i.principalCents - i.paidCents);
+        if (i.dueDate <= now) {
+          due += i.principalCents;
+          paid += Math.min(i.paidCents, i.principalCents);
+        }
+        if (i.status === "overdue") behind = true;
+      }
+
+      line.dueToDateCents += due;
+      line.paidToDateCents += paid;
+      line.outstandingCents += owed;
+      overall.dueToDateCents += due;
+      overall.paidToDateCents += paid;
+      overall.outstandingCents += owed;
+
+      if (behind) {
+        line.behindContracts += 1;
+        overall.behindContracts += 1;
+      }
+      if (c.state === "in_default") {
+        line.defaultedContracts += 1;
+        overall.defaultedContracts += 1;
+      }
+      collectionLines.set(key, line);
+    }
+
+    const collectionFacts: CollectionFacts = {
+      windowMonths: ANALYTICS_WINDOW_MONTHS,
+      byAgent: [...collectionLines.values()].sort(
+        (a, b) => b.termContracts - a.termContracts,
+      ),
+      overall,
+    };
+
     return {
       agents: analyseAgents(agentFacts),
       phases: analysePhases(phaseFacts),
       discounts: analyseDiscounts(discountFacts),
       discountFacts,
+      collections: analyseCollections(collectionFacts),
+      collectionFacts,
       agentFacts,
       phaseFacts,
       windowMonths: ANALYTICS_WINDOW_MONTHS,
