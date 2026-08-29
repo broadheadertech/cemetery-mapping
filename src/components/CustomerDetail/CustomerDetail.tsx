@@ -140,7 +140,7 @@ export function CustomerDetail({ detail }: CustomerDetailProps) {
           Activity
         </h2>
         <Link
-          href={`/audit?entityType=customer&entityId=${detail.customerId}`}
+          href={`/admin/audit-log?entityType=customer&entityId=${detail.customerId}`}
           data-testid="customer-audit-link"
           className="inline-flex items-center text-sm font-medium text-slate-900 underline"
         >

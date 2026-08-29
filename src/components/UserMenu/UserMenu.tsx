@@ -1,8 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { useAuthActions } from "@convex-dev/auth/react";
+import { useSignOut } from "@/components/SessionGuard";
 import { LogOut, Sun } from "lucide-react";
 import { cn } from "@/lib/cn";
 import {
@@ -48,25 +47,28 @@ function initialsOf(name: string, email: string): string {
 }
 
 export function UserMenu({ name, email, collapsed }: UserMenuProps) {
-  const router = useRouter();
-  const { signOut } = useAuthActions();
+  const { beginSignOut } = useSignOut();
   const { isOutdoor, toggleOutdoor } = useTheme();
   const [signingOut, setSigningOut] = useState(false);
 
-  async function handleSignOut() {
+  /**
+   * Hand the sign-out to the guard rather than doing it here.
+   *
+   * Calling `signOut()` from this component tore auth down while the
+   * dashboard was still mounted. Every `useQuery` under it then
+   * rejected, and a rejected `useQuery` THROWS during render — so
+   * logging out landed on React's crash screen. `router.push` did not
+   * save it: the navigation is asynchronous and the old tree keeps
+   * rendering until the new route commits.
+   *
+   * `beginSignOut()` swaps the guarded subtree for a message first,
+   * which unmounts every subscription synchronously, and only then
+   * clears the session. Nothing is left mounted to throw.
+   */
+  function handleSignOut() {
     if (signingOut) return;
     setSigningOut(true);
-    try {
-      await signOut();
-      router.push("/login");
-    } catch {
-      // Sign-out failures are rare; the worst case is a stale token
-      // that the next protected request will reject anyway. Keep the
-      // UX optimistic and route to /login regardless.
-      router.push("/login");
-    } finally {
-      setSigningOut(false);
-    }
+    beginSignOut();
   }
 
   const initials = initialsOf(name, email);

@@ -100,13 +100,13 @@ const salesByDimensionRef = makeFunctionReference<
   "query",
   { from: number; to: number },
   unknown
->("reports:salesByDimension");
+>("reports:internal_salesByDimensionForExport");
 
 const getAgingSummaryRef = makeFunctionReference<
   "query",
   Record<string, never>,
   unknown
->("arAging:getAgingSummary");
+>("arAging:internal_agingSummaryForExport");
 
 const auditLogListRecentRef = makeFunctionReference<
   "query",
@@ -116,7 +116,7 @@ const auditLogListRecentRef = makeFunctionReference<
     to?: number;
   },
   unknown
->("auditLogQueries:listRecent");
+>("auditLogQueries:internal_recentAuditPageForExport");
 
 // ---------------------------------------------------------------------------
 // Report row shape — the renderer-agnostic intermediate form. Every

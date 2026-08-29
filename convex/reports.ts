@@ -59,6 +59,7 @@
 
 import {
   type DataModelFromSchemaDefinition,
+  internalQueryGeneric,
   mutationGeneric,
   queryGeneric,
 } from "convex/server";
@@ -541,6 +542,192 @@ const LOT_TYPE_ORDER: readonly LotType[] = [
  *     production data path will populate it once the schema field
  *     + sales-recording capture flow ship together.
  */
+/**
+ * The report itself, with no role check.
+ *
+ * Split out because the export action is SCHEDULED, and a scheduled
+ * action carries no user identity — `ctx.auth` is empty, so calling the
+ * public query below threw UNAUTHENTICATED and every sales export
+ * failed into the `failed` state. Authorisation happens once, at
+ * `exports:requestExport`, which is `requireRole(["admin"])`; by the
+ * time the renderer runs the decision has been made and there is nobody
+ * left to ask.
+ */
+async function computeSalesByDimension(
+  ctx: QueryCtx,
+  args: { from: number; to: number },
+): Promise<SalesByDimensionReport> {
+
+  const settings = await readAppSettings(ctx);
+  const agentTrackingEnabled = settings.salesAgentTrackingEnabled;
+
+  // Validate the range. The mutation /UI layer also validates; this is
+  // defense in depth so a hand-crafted client cannot pass `from > to`
+  // and get an arbitrarily-large scan back.
+  if (
+    !Number.isFinite(args.from) ||
+    !Number.isFinite(args.to) ||
+    args.from > args.to
+  ) {
+    return {
+      from: args.from,
+      to: args.to,
+      generatedAt: Date.now(),
+      salesAgentTrackingEnabled: agentTrackingEnabled,
+      totalCount: 0,
+      totalAmountCents: 0,
+      lotTypes: [],
+    };
+  }
+
+  const contracts = (await ctx.db
+    .query("contracts")
+    .withIndex("by_createdAt", (q) =>
+      q.gte("createdAt", args.from).lte("createdAt", args.to),
+    )
+    .collect()) as ContractDoc[];
+
+  interface SectionBucket {
+    count: number;
+    totalAmountCents: number;
+    agents: Map<string, { name: string; count: number; totalAmountCents: number }>;
+  }
+  interface LotTypeBucket {
+    count: number;
+    totalAmountCents: number;
+    sections: Map<string, SectionBucket>;
+  }
+
+  const byLotType = new Map<LotType, LotTypeBucket>();
+  let totalCount = 0;
+  let totalAmountCents = 0;
+
+  for (const contract of contracts) {
+    if (contract.state === "voided" || contract.state === "cancelled") {
+      continue;
+    }
+    const lot = await ctx.db.get(contract.lotId);
+    if (lot === null) continue;
+
+    let lotTypeBucket = byLotType.get(lot.type);
+    if (lotTypeBucket === undefined) {
+      lotTypeBucket = {
+        count: 0,
+        totalAmountCents: 0,
+        sections: new Map(),
+      };
+      byLotType.set(lot.type, lotTypeBucket);
+    }
+    lotTypeBucket.count += 1;
+    lotTypeBucket.totalAmountCents = add(
+      lotTypeBucket.totalAmountCents,
+      contract.totalPriceCents,
+    );
+
+    const sectionKey = lot.section;
+    let sectionBucket = lotTypeBucket.sections.get(sectionKey);
+    if (sectionBucket === undefined) {
+      sectionBucket = {
+        count: 0,
+        totalAmountCents: 0,
+        agents: new Map(),
+      };
+      lotTypeBucket.sections.set(sectionKey, sectionBucket);
+    }
+    sectionBucket.count += 1;
+    sectionBucket.totalAmountCents = add(
+      sectionBucket.totalAmountCents,
+      contract.totalPriceCents,
+    );
+
+    // Agent branch — only walked when the toggle is on. The
+    // `contracts.agentId` field is reserved (story §10 Q5 pending);
+    // until it lands, we narrow via a runtime probe rather than a
+    // typed read. When the field is present the per-agent map gets
+    // an entry; otherwise the section ships with `agents: []`.
+    if (agentTrackingEnabled) {
+      const probe = (contract as unknown as Record<string, unknown>).agentId;
+      if (typeof probe === "string" && probe.length > 0) {
+        let agentEntry = sectionBucket.agents.get(probe);
+        if (agentEntry === undefined) {
+          // Resolve the agent's display name once. The user lookup is
+          // cheap (single get by id); we only do it on first sighting
+          // per section to keep the join count bounded.
+          let name = "(agent)";
+          try {
+            const user = await ctx.db.get(
+              probe as unknown as DataModel["users"]["document"]["_id"],
+            );
+            if (user !== null && typeof user.name === "string") {
+              name = user.name;
+            }
+          } catch {
+            // Best-effort; the agent id may be stale.
+          }
+          agentEntry = { name, count: 0, totalAmountCents: 0 };
+          sectionBucket.agents.set(probe, agentEntry);
+        }
+        agentEntry.count += 1;
+        agentEntry.totalAmountCents = add(
+          agentEntry.totalAmountCents,
+          contract.totalPriceCents,
+        );
+      }
+    }
+
+    totalCount += 1;
+    totalAmountCents = add(totalAmountCents, contract.totalPriceCents);
+  }
+
+  // Emit the report in a deterministic order (lot-type enum order,
+  // then section name ascending, then agent name ascending). Stable
+  // ordering makes UI snapshots + CSV exports byte-deterministic.
+  const lotTypes: SalesByDimensionLotTypeRow[] = [];
+  for (const lotType of LOT_TYPE_ORDER) {
+    const bucket = byLotType.get(lotType);
+    if (bucket === undefined) continue;
+    const sections: SalesByDimensionSectionRow[] = [];
+    const sortedSectionKeys = [...bucket.sections.keys()].sort();
+    for (const sectionKey of sortedSectionKeys) {
+      const section = bucket.sections.get(sectionKey);
+      if (section === undefined) continue;
+      const row: SalesByDimensionSectionRow = {
+        section: sectionKey,
+        count: section.count,
+        totalAmountCents: section.totalAmountCents,
+      };
+      if (agentTrackingEnabled) {
+        const agents: SalesByDimensionAgentRow[] = [...section.agents.entries()]
+          .map(([agentId, entry]) => ({
+            agentId,
+            agentName: entry.name,
+            count: entry.count,
+            totalAmountCents: entry.totalAmountCents,
+          }))
+          .sort((a, b) => a.agentName.localeCompare(b.agentName));
+        row.agents = agents;
+      }
+      sections.push(row);
+    }
+    lotTypes.push({
+      lotType,
+      count: bucket.count,
+      totalAmountCents: bucket.totalAmountCents,
+      sections,
+    });
+  }
+
+  return {
+    from: args.from,
+    to: args.to,
+    generatedAt: Date.now(),
+    salesAgentTrackingEnabled: agentTrackingEnabled,
+    totalCount,
+    totalAmountCents,
+    lotTypes,
+  };
+}
+
 export const salesByDimension = queryGeneric({
   args: {
     from: v.number(),
@@ -551,176 +738,23 @@ export const salesByDimension = queryGeneric({
     args: { from: number; to: number },
   ): Promise<SalesByDimensionReport> => {
     await requireRole(ctx, ["admin"]);
-
-    const settings = await readAppSettings(ctx);
-    const agentTrackingEnabled = settings.salesAgentTrackingEnabled;
-
-    // Validate the range. The mutation /UI layer also validates; this is
-    // defense in depth so a hand-crafted client cannot pass `from > to`
-    // and get an arbitrarily-large scan back.
-    if (
-      !Number.isFinite(args.from) ||
-      !Number.isFinite(args.to) ||
-      args.from > args.to
-    ) {
-      return {
-        from: args.from,
-        to: args.to,
-        generatedAt: Date.now(),
-        salesAgentTrackingEnabled: agentTrackingEnabled,
-        totalCount: 0,
-        totalAmountCents: 0,
-        lotTypes: [],
-      };
-    }
-
-    const contracts = (await ctx.db
-      .query("contracts")
-      .withIndex("by_createdAt", (q) =>
-        q.gte("createdAt", args.from).lte("createdAt", args.to),
-      )
-      .collect()) as ContractDoc[];
-
-    interface SectionBucket {
-      count: number;
-      totalAmountCents: number;
-      agents: Map<string, { name: string; count: number; totalAmountCents: number }>;
-    }
-    interface LotTypeBucket {
-      count: number;
-      totalAmountCents: number;
-      sections: Map<string, SectionBucket>;
-    }
-
-    const byLotType = new Map<LotType, LotTypeBucket>();
-    let totalCount = 0;
-    let totalAmountCents = 0;
-
-    for (const contract of contracts) {
-      if (contract.state === "voided" || contract.state === "cancelled") {
-        continue;
-      }
-      const lot = await ctx.db.get(contract.lotId);
-      if (lot === null) continue;
-
-      let lotTypeBucket = byLotType.get(lot.type);
-      if (lotTypeBucket === undefined) {
-        lotTypeBucket = {
-          count: 0,
-          totalAmountCents: 0,
-          sections: new Map(),
-        };
-        byLotType.set(lot.type, lotTypeBucket);
-      }
-      lotTypeBucket.count += 1;
-      lotTypeBucket.totalAmountCents = add(
-        lotTypeBucket.totalAmountCents,
-        contract.totalPriceCents,
-      );
-
-      const sectionKey = lot.section;
-      let sectionBucket = lotTypeBucket.sections.get(sectionKey);
-      if (sectionBucket === undefined) {
-        sectionBucket = {
-          count: 0,
-          totalAmountCents: 0,
-          agents: new Map(),
-        };
-        lotTypeBucket.sections.set(sectionKey, sectionBucket);
-      }
-      sectionBucket.count += 1;
-      sectionBucket.totalAmountCents = add(
-        sectionBucket.totalAmountCents,
-        contract.totalPriceCents,
-      );
-
-      // Agent branch — only walked when the toggle is on. The
-      // `contracts.agentId` field is reserved (story §10 Q5 pending);
-      // until it lands, we narrow via a runtime probe rather than a
-      // typed read. When the field is present the per-agent map gets
-      // an entry; otherwise the section ships with `agents: []`.
-      if (agentTrackingEnabled) {
-        const probe = (contract as unknown as Record<string, unknown>).agentId;
-        if (typeof probe === "string" && probe.length > 0) {
-          let agentEntry = sectionBucket.agents.get(probe);
-          if (agentEntry === undefined) {
-            // Resolve the agent's display name once. The user lookup is
-            // cheap (single get by id); we only do it on first sighting
-            // per section to keep the join count bounded.
-            let name = "(agent)";
-            try {
-              const user = await ctx.db.get(
-                probe as unknown as DataModel["users"]["document"]["_id"],
-              );
-              if (user !== null && typeof user.name === "string") {
-                name = user.name;
-              }
-            } catch {
-              // Best-effort; the agent id may be stale.
-            }
-            agentEntry = { name, count: 0, totalAmountCents: 0 };
-            sectionBucket.agents.set(probe, agentEntry);
-          }
-          agentEntry.count += 1;
-          agentEntry.totalAmountCents = add(
-            agentEntry.totalAmountCents,
-            contract.totalPriceCents,
-          );
-        }
-      }
-
-      totalCount += 1;
-      totalAmountCents = add(totalAmountCents, contract.totalPriceCents);
-    }
-
-    // Emit the report in a deterministic order (lot-type enum order,
-    // then section name ascending, then agent name ascending). Stable
-    // ordering makes UI snapshots + CSV exports byte-deterministic.
-    const lotTypes: SalesByDimensionLotTypeRow[] = [];
-    for (const lotType of LOT_TYPE_ORDER) {
-      const bucket = byLotType.get(lotType);
-      if (bucket === undefined) continue;
-      const sections: SalesByDimensionSectionRow[] = [];
-      const sortedSectionKeys = [...bucket.sections.keys()].sort();
-      for (const sectionKey of sortedSectionKeys) {
-        const section = bucket.sections.get(sectionKey);
-        if (section === undefined) continue;
-        const row: SalesByDimensionSectionRow = {
-          section: sectionKey,
-          count: section.count,
-          totalAmountCents: section.totalAmountCents,
-        };
-        if (agentTrackingEnabled) {
-          const agents: SalesByDimensionAgentRow[] = [...section.agents.entries()]
-            .map(([agentId, entry]) => ({
-              agentId,
-              agentName: entry.name,
-              count: entry.count,
-              totalAmountCents: entry.totalAmountCents,
-            }))
-            .sort((a, b) => a.agentName.localeCompare(b.agentName));
-          row.agents = agents;
-        }
-        sections.push(row);
-      }
-      lotTypes.push({
-        lotType,
-        count: bucket.count,
-        totalAmountCents: bucket.totalAmountCents,
-        sections,
-      });
-    }
-
-    return {
-      from: args.from,
-      to: args.to,
-      generatedAt: Date.now(),
-      salesAgentTrackingEnabled: agentTrackingEnabled,
-      totalCount,
-      totalAmountCents,
-      lotTypes,
-    };
+    return computeSalesByDimension(ctx, args);
   },
+});
+
+/**
+ * Internal read for the scheduled export renderer. Unreachable from a
+ * client; the admin gate lives on `requestExport`.
+ */
+export const internal_salesByDimensionForExport = internalQueryGeneric({
+  args: {
+    from: v.number(),
+    to: v.number(),
+  },
+  handler: async (
+    ctx: QueryCtx,
+    args: { from: number; to: number },
+  ): Promise<SalesByDimensionReport> => computeSalesByDimension(ctx, args),
 });
 
 /**

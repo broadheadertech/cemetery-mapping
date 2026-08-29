@@ -46,6 +46,7 @@
 import {
   type DataModelFromSchemaDefinition,
   internalMutationGeneric,
+  internalQueryGeneric,
   mutationGeneric,
   queryGeneric,
 } from "convex/server";
@@ -443,72 +444,120 @@ export const recomputeNow = mutationGeneric({
  * Auth: admin or office_staff — the staff drill-down (Story 4.8) and the
  * dashboard tile (Story 5.2) both read here.
  */
+/**
+ * The ageing summary itself, with no role check.
+ *
+ * Split out for the scheduled export renderer, which carries no user
+ * identity — see the note on `computeSalesByDimension` in
+ * `convex/reports.ts`. The admin gate lives on `exports:requestExport`.
+ */
+async function computeAgingSummary(
+  ctx: QueryCtx,
+): Promise<{
+  buckets: Array<{
+    key: "1-30" | "31-60" | "61-90" | "90+";
+    count: number;
+    totalCents: number;
+    withLoggedActionCount: number;
+  }>;
+  currentCents: number;
+  currentCount: number;
+  totalOverdueCents: number;
+  totalOverdueCount: number;
+  oldestSnapshotAt: number | null;
+}> {
+  const rows = (await ctx.db
+    .query("arAgingSnapshots")
+    .collect()) as SnapshotDoc[];
+
+  const bucketAcc: Record<
+    ArAgingBucket,
+    { count: number; totalCents: number; withAction: number }
+  > = {
+    current: { count: 0, totalCents: 0, withAction: 0 },
+    "1-30": { count: 0, totalCents: 0, withAction: 0 },
+    "31-60": { count: 0, totalCents: 0, withAction: 0 },
+    "61-90": { count: 0, totalCents: 0, withAction: 0 },
+    "90+": { count: 0, totalCents: 0, withAction: 0 },
+  };
+  let oldestSnapshotAt: number | null = null;
+  for (const row of rows) {
+    const acc = bucketAcc[row.bucket];
+    acc.count += 1;
+    acc.totalCents += row.totalOverdueCents;
+    acc.withAction += row.overdueCountWithAction;
+    if (oldestSnapshotAt === null || row.recomputedAt < oldestSnapshotAt) {
+      oldestSnapshotAt = row.recomputedAt;
+    }
+  }
+
+  const dashboardKeys = ["1-30", "31-60", "61-90", "90+"] as const;
+  const buckets = dashboardKeys.map((key) => ({
+    key,
+    count: bucketAcc[key].count,
+    totalCents: bucketAcc[key].totalCents,
+    withLoggedActionCount: bucketAcc[key].withAction,
+  }));
+
+  const totalOverdueCents = buckets.reduce(
+    (sum, b) => sum + b.totalCents,
+    0,
+  );
+  const totalOverdueCount = buckets.reduce((sum, b) => sum + b.count, 0);
+
+  return {
+    buckets,
+    currentCents: bucketAcc.current.totalCents,
+    currentCount: bucketAcc.current.count,
+    totalOverdueCents,
+    totalOverdueCount,
+    oldestSnapshotAt,
+  };
+}
+
 export const getAgingSummary = queryGeneric({
   args: {},
   handler: async (
     ctx: QueryCtx,
   ): Promise<{
-    buckets: Array<{
-      key: "1-30" | "31-60" | "61-90" | "90+";
-      count: number;
-      totalCents: number;
-      withLoggedActionCount: number;
-    }>;
-    currentCents: number;
-    currentCount: number;
-    totalOverdueCents: number;
-    totalOverdueCount: number;
-    oldestSnapshotAt: number | null;
-  }> => {
+  buckets: Array<{
+    key: "1-30" | "31-60" | "61-90" | "90+";
+    count: number;
+    totalCents: number;
+    withLoggedActionCount: number;
+  }>;
+  currentCents: number;
+  currentCount: number;
+  totalOverdueCents: number;
+  totalOverdueCount: number;
+  oldestSnapshotAt: number | null;
+}> => {
     await requireRole(ctx, ["admin", "office_staff"]);
-    const rows = (await ctx.db
-      .query("arAgingSnapshots")
-      .collect()) as SnapshotDoc[];
-
-    const bucketAcc: Record<
-      ArAgingBucket,
-      { count: number; totalCents: number; withAction: number }
-    > = {
-      current: { count: 0, totalCents: 0, withAction: 0 },
-      "1-30": { count: 0, totalCents: 0, withAction: 0 },
-      "31-60": { count: 0, totalCents: 0, withAction: 0 },
-      "61-90": { count: 0, totalCents: 0, withAction: 0 },
-      "90+": { count: 0, totalCents: 0, withAction: 0 },
-    };
-    let oldestSnapshotAt: number | null = null;
-    for (const row of rows) {
-      const acc = bucketAcc[row.bucket];
-      acc.count += 1;
-      acc.totalCents += row.totalOverdueCents;
-      acc.withAction += row.overdueCountWithAction;
-      if (oldestSnapshotAt === null || row.recomputedAt < oldestSnapshotAt) {
-        oldestSnapshotAt = row.recomputedAt;
-      }
-    }
-
-    const dashboardKeys = ["1-30", "31-60", "61-90", "90+"] as const;
-    const buckets = dashboardKeys.map((key) => ({
-      key,
-      count: bucketAcc[key].count,
-      totalCents: bucketAcc[key].totalCents,
-      withLoggedActionCount: bucketAcc[key].withAction,
-    }));
-
-    const totalOverdueCents = buckets.reduce(
-      (sum, b) => sum + b.totalCents,
-      0,
-    );
-    const totalOverdueCount = buckets.reduce((sum, b) => sum + b.count, 0);
-
-    return {
-      buckets,
-      currentCents: bucketAcc.current.totalCents,
-      currentCount: bucketAcc.current.count,
-      totalOverdueCents,
-      totalOverdueCount,
-      oldestSnapshotAt,
-    };
+    return computeAgingSummary(ctx);
   },
+});
+
+/**
+ * Internal read for the scheduled export renderer. Unreachable from a
+ * client.
+ */
+export const internal_agingSummaryForExport = internalQueryGeneric({
+  args: {},
+  handler: async (
+    ctx: QueryCtx,
+  ): Promise<{
+  buckets: Array<{
+    key: "1-30" | "31-60" | "61-90" | "90+";
+    count: number;
+    totalCents: number;
+    withLoggedActionCount: number;
+  }>;
+  currentCents: number;
+  currentCount: number;
+  totalOverdueCents: number;
+  totalOverdueCount: number;
+  oldestSnapshotAt: number | null;
+}> => computeAgingSummary(ctx),
 });
 
 /**
