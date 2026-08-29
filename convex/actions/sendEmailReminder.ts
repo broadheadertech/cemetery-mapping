@@ -82,12 +82,15 @@ interface DeliveryForSend {
     contractId: ContractId;
     contractNumber: string;
   };
+  /** Null for a message about the whole contract, not one instalment. */
   installment: {
     installmentId: InstallmentId;
     dueDate: number;
     principalCents: number;
     paidCents: number;
-  };
+  } | null;
+  kind: "installment_due" | "contract_paid_in_full";
+  contractTotalCents: number;
   lotCode: string;
 }
 
@@ -187,22 +190,32 @@ export const send = actionGeneric({
     // The getDeliveryForSend gate already short-circuits the `status:
     // "paid"` case; this is the defense-in-depth check for
     // partially-paid rows whose remaining balance happens to be <= 0.
-    const amountCents =
-      view.installment.principalCents - view.installment.paidCents;
-    if (amountCents <= 0) {
-      await ctx.runMutation(markDeliveryFailedRef, {
-        deliveryId: args.deliveryId,
-        transient: false,
-        error: "stale_paid",
-      });
-      return { outcome: "permanent_failure" };
+    // The paid-in-full notice carries the CONTRACT's figures, not an
+    // instalment's, and must not meet the stale-paid guard below —
+    // nothing is outstanding, which is the whole point of the message.
+    let amountCents: number;
+    let dateMs: number;
+    if (view.installment === null) {
+      amountCents = view.contractTotalCents;
+      dateMs = Date.now();
+    } else {
+      amountCents = view.installment.principalCents - view.installment.paidCents;
+      dateMs = view.installment.dueDate;
+      if (amountCents <= 0) {
+        await ctx.runMutation(markDeliveryFailedRef, {
+          deliveryId: args.deliveryId,
+          transient: false,
+          error: "stale_paid",
+        });
+        return { outcome: "permanent_failure" };
+      }
     }
 
     const rendered = renderEmail(view.templateKey, {
       customerName: view.customer.fullName,
       amountCents,
       lotCode: view.lotCode,
-      dueDateMs: view.installment.dueDate,
+      dueDateMs: dateMs,
       portalUrl: resolvePortalUrl(),
     });
 

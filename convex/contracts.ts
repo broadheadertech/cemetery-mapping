@@ -92,6 +92,7 @@ import {
 import { postFinancialEvent } from "./lib/postFinancialEvent";
 import {
   transitionContractState,
+  scheduleFullyPaidNotice,
   transitionLotStatus,
 } from "./lib/stateMachines";
 
@@ -911,6 +912,13 @@ export const recordFullPaymentSale = mutationGeneric({
         args.enquiryId as unknown as DataModel["enquiries"]["document"]["_id"];
     }
     const contractId = await ctx.db.insert("contracts", contractRow);
+
+    // A cash sale is BORN paid in full and never passes through
+    // `transitionContractState`, so the notice is fired here too. The
+    // office work list treats these contracts identically — they are
+    // settled and owed a certificate — and a notice that skipped them
+    // would be arbitrary rather than principled.
+    await scheduleFullyPaidNotice(ctx, contractId);
 
     // Step 5: Transition the lot from `available` to `sold`. The helper
     // re-reads the lot inside the same transaction, so a concurrent

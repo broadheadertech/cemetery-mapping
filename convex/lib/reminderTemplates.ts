@@ -39,7 +39,13 @@ export type SmsTemplateKey =
 export type EmailTemplateKey =
   | "upcoming_due_3d_email"
   | "due_today_email"
-  | "overdue_7d_email";
+  | "overdue_7d_email"
+  // Not a reminder. Nothing is owed, nothing is being chased — this is
+  // the one message the estate sends that asks for nothing, and it
+  // reads that way. It rides the same delivery machinery because
+  // opt-out, bounce handling and retries are the same problem whatever
+  // the message says.
+  | "paid_in_full_email";
 
 export type AnyTemplateKey = SmsTemplateKey | EmailTemplateKey;
 
@@ -165,6 +171,37 @@ export function renderEmail(
       });
       return { subject, bodyPlain, bodyHtml };
     }
+    case "paid_in_full_email": {
+      // `amountCents` is the contract total and `dueDateMs` the day it
+      // was settled — the same fields, carrying different facts. The
+      // renderer never says "due" for this key.
+      const subject = "Your lot at Apostle Paul Memorial Park is fully paid";
+      const bodyPlain =
+        `Dear ${ctx.customerName},
+
+` +
+        `Your contract for the lot ${ctx.lotCode} was settled in full on ${date}, in the amount of ${peso}. The ground is yours, and nothing further is owed.
+
+` +
+        `Your certificate of ownership is being prepared. The Estate Office will be in touch when it is ready to collect, and it will also appear in your account.
+
+` +
+        `With thanks for your trust: ${ctx.portalUrl}
+
+` +
+        footerPlain;
+      const bodyHtml = renderEmailHtml({
+        heading: "Settled in full",
+        salutation: `Dear ${ctx.customerName},`,
+        paragraphs: [
+          `Your contract for the lot <strong>${escapeHtml(ctx.lotCode)}</strong> was settled in full on <strong>${escapeHtml(date)}</strong>, in the amount of <strong>${peso}</strong>. The ground is yours, and nothing further is owed.`,
+          `Your certificate of ownership is being prepared. The Estate Office will be in touch when it is ready to collect, and it will also appear in your account.`,
+        ],
+        portalUrl: ctx.portalUrl,
+        footerHtml,
+      });
+      return { subject, bodyPlain, bodyHtml };
+    }
   }
 }
 
@@ -208,7 +245,8 @@ export function isEmailTemplateKey(s: string): s is EmailTemplateKey {
   return (
     s === "upcoming_due_3d_email" ||
     s === "due_today_email" ||
-    s === "overdue_7d_email"
+    s === "overdue_7d_email" ||
+    s === "paid_in_full_email"
   );
 }
 

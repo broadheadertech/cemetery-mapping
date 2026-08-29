@@ -465,6 +465,20 @@ export async function transitionContractState(
     after: { state: params.to },
     reason: params.reason,
   });
+  // A family that has just finished paying should be told so. Fired
+  // from here rather than from each caller because there are several
+  // ways a contract lands on `paid_in_full` — the last instalment, a
+  // custom allocation, an admin correction — and a notice that depends
+  // on remembering to add it at every one of them is a notice that
+  // eventually stops going out.
+  //
+  // Scheduled rather than awaited inline: it must not be able to fail a
+  // payment. The enqueue mutation is idempotent per contract and silent
+  // when there is no email, an opt-out, or a bounced address.
+  if (params.to === "paid_in_full" && from !== "paid_in_full") {
+    await scheduleFullyPaidNotice(ctx, params.contractId);
+  }
+
   const updated = await ctx.db.get(params.contractId);
   if (updated === null) {
     // Defensive — the patch just succeeded, so this branch is
@@ -474,4 +488,48 @@ export async function transitionContractState(
     throwError(ErrorCode.NOT_FOUND, "Contract not found after transition.");
   }
   return updated;
+}
+
+/**
+ * Queue the "you have finished paying" notice, best effort.
+ *
+ * Resolved dynamically for the same reason the reminder scan does it:
+ * `_generated/api` is produced by `npx convex dev`, and until it lands
+ * this is a no-op so a typecheck without codegen still passes.
+ *
+ * Swallows its own failure deliberately. The office work list on
+ * `/certificates` does not depend on anybody's inbox, and a message not
+ * going out must never be the reason a payment does not post.
+ */
+export async function scheduleFullyPaidNotice(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ctx: any,
+  contractId: unknown,
+): Promise<void> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let internalApi: any = null;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      internalApi = require("../_generated/api").internal;
+    } catch {
+      return;
+    }
+    if (
+      internalApi === null ||
+      internalApi.reminders === undefined ||
+      internalApi.reminders.internal_enqueuePaidInFull === undefined
+    ) {
+      return;
+    }
+    await ctx.scheduler.runAfter(
+      0,
+      internalApi.reminders.internal_enqueuePaidInFull,
+      { contractId },
+    );
+  } catch (error) {
+    console.warn("[transitionContractState] paid-in-full notice not queued", {
+      error: String(error),
+    });
+  }
 }

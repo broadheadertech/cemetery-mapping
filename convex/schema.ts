@@ -3569,7 +3569,33 @@ export default defineSchema({
   reminderDeliveries: defineTable({
     customerId: v.id("customers"),
     contractId: v.id("contracts"),
-    installmentId: v.id("installments"),
+    /**
+     * OPTIONAL as of the paid-in-full notice.
+     *
+     * Every delivery until now was about one instalment falling due, so
+     * this was required. The message telling a family they have finished
+     * paying is about the CONTRACT, and has no instalment to point at —
+     * loosening the field was the alternative to standing up a second
+     * delivery system with its own retries, bounce handling and
+     * opt-out, which would have been strictly worse.
+     *
+     * Absent is only valid when `kind` says so. The `by_installment_rule`
+     * index still carries these rows, with `undefined` as the sentinel
+     * Convex uses; the daily scan only ever probes it with a real
+     * instalment id, so it never meets them.
+     */
+    installmentId: v.optional(v.id("installments")),
+    /**
+     * What this delivery is about. Absent means `installment_due`, so
+     * every row written before this field existed stays valid without a
+     * backfill.
+     */
+    kind: v.optional(
+      v.union(
+        v.literal("installment_due"),
+        v.literal("contract_paid_in_full"),
+      ),
+    ),
     channel: v.union(v.literal("sms"), v.literal("email")),
     templateKey: v.string(),
     ruleOffset: v.number(),
@@ -3589,6 +3615,10 @@ export default defineSchema({
     nextAttemptAt: v.optional(v.number()),
   })
     .index("by_installment_rule", ["installmentId", "ruleOffset", "channel"])
+    // One paid-in-full notice per contract, ever. A family that has
+    // finished paying should hear so once; hearing it twice reads as a
+    // system that does not know what it has already said.
+    .index("by_contract_kind", ["contractId", "kind"])
     .index("by_customer", ["customerId"])
     .index("by_status_scheduledAt", ["status", "scheduledAt"])
     .index("by_channel_status", ["channel", "status"]),
