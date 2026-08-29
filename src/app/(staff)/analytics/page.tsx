@@ -123,9 +123,32 @@ interface PhaseFacts {
   averagePriceCents: number;
 }
 
+interface DiscountLine {
+  key: string;
+  label: string;
+  contracts: number;
+  discountedContracts: number;
+  listCents: number;
+  discountCents: number;
+}
+
+interface DiscountFacts {
+  windowMonths: number;
+  totalContracts: number;
+  discountedContracts: number;
+  totalDiscountCents: number;
+  discountedListCents: number;
+  byAgent: DiscountLine[];
+  bySection: DiscountLine[];
+  reasons: Array<{ reason: string; count: number; discountCents: number }>;
+  policyContracts: number;
+}
+
 interface AnalysisResult {
   agents: Insight[];
   phases: Insight[];
+  discounts: Insight[];
+  discountFacts: DiscountFacts;
   agentFacts: AgentFacts[];
   phaseFacts: PhaseFacts[];
   windowMonths: number;
@@ -210,6 +233,14 @@ export default function AnalyticsPage(): ReactElement {
             insights={analysis.phases}
           />
           <PhaseTable facts={analysis.phaseFacts} />
+
+          <hr className="border-slate-200" />
+          <InsightPanel
+            title="Discounts"
+            subtitle="Money given away at the counter — not what a plan or a promotion takes off, which is policy."
+            insights={analysis.discounts}
+          />
+          <DiscountTable facts={analysis.discountFacts} />
         </>
       )}
 
@@ -623,6 +654,88 @@ function PhaseTable({ facts }: { facts: PhaseFacts[] }): ReactElement {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+/**
+ * The discounts behind the findings.
+ *
+ * Split by garden rather than by seller in the table, because the
+ * per-seller comparison is already in the findings above and repeating
+ * a name beside a peso figure twice reads as an accusation rather than
+ * as data. The reasons list is the useful half: it is where a policy
+ * nobody wrote down becomes visible.
+ */
+function DiscountTable({ facts }: { facts: DiscountFacts }): ReactElement {
+  if (facts.discountedContracts === 0) return <></>;
+
+  const rate = (row: { listCents: number; discountCents: number }): string =>
+    row.listCents > 0
+      ? `${(Math.round((row.discountCents / row.listCents) * 1000) / 10).toFixed(1)}%`
+      : "—";
+
+  return (
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wider text-slate-500">
+              <th className="px-4 py-2 font-medium">Garden</th>
+              <th className="px-4 py-2 text-right font-medium">Discounted</th>
+              <th className="px-4 py-2 text-right font-medium">Given</th>
+              <th className="px-4 py-2 text-right font-medium">Rate</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {facts.bySection
+              .filter((row) => row.discountedContracts > 0)
+              .map((row) => (
+                <tr key={row.key} data-testid="discount-section-row">
+                  <td className="px-4 py-2.5 text-slate-800">{row.label}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-slate-700">
+                    {row.discountedContracts} of {row.contracts}
+                  </td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-slate-700">
+                    {formatPeso(row.discountCents)}
+                  </td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-slate-700">
+                    {rate(row)}
+                  </td>
+                </tr>
+              ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wider text-slate-500">
+              <th className="px-4 py-2 font-medium">Reason given</th>
+              <th className="px-4 py-2 text-right font-medium">Times</th>
+              <th className="px-4 py-2 text-right font-medium">Worth</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {facts.reasons.slice(0, 12).map((r) => (
+              <tr key={r.reason} data-testid="discount-reason-row">
+                <td className="px-4 py-2.5 text-slate-800">{r.reason}</td>
+                <td className="px-4 py-2.5 text-right tabular-nums text-slate-700">
+                  {r.count}
+                </td>
+                <td className="px-4 py-2.5 text-right tabular-nums text-slate-700">
+                  {formatPeso(r.discountCents)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">
+          Grouped on the exact words typed. A reason appearing again and
+          again is usually a policy that belongs in the price book.
+        </p>
+      </div>
     </div>
   );
 }

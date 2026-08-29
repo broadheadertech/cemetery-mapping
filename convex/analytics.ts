@@ -39,8 +39,11 @@ import {
 import { computeTrailingMonthBounds } from "./trends";
 import {
   analyseAgents,
+  analyseDiscounts,
   analysePhases,
   type AgentFacts,
+  type DiscountFacts,
+  type DiscountLine,
   type Insight,
   type PhaseFacts,
 } from "./lib/insights";
@@ -135,6 +138,8 @@ export interface InventoryAnalytics {
 export interface AnalysisResult {
   agents: Insight[];
   phases: Insight[];
+  discounts: Insight[];
+  discountFacts: DiscountFacts;
   /** The facts the agent findings were computed from, for the table. */
   agentFacts: AgentFacts[];
   /** The facts the phase findings were computed from, for the table. */
@@ -317,6 +322,34 @@ export const getInventoryAnalytics = queryGeneric({
   },
 });
 
+/** Accumulate one contract into a discount line. */
+function bump(
+  into: Map<string, DiscountLine>,
+  key: string,
+  label: string,
+  discountCents: number,
+  listCents: number,
+): void {
+  const row = into.get(key) ?? {
+    key,
+    label,
+    contracts: 0,
+    discountedContracts: 0,
+    listCents: 0,
+    discountCents: 0,
+  };
+  row.contracts += 1;
+  if (discountCents > 0) {
+    row.discountedContracts += 1;
+    row.discountCents += discountCents;
+    // Only the discounted contracts' value, so the rate below is
+    // "how deep were the discounts" and not diluted by every sale
+    // that carried none.
+    row.listCents += listCents;
+  }
+  into.set(key, row);
+}
+
 /** Which trailing-month bucket a timestamp falls in, or -1. */
 function bucketIndexOf(
   buckets: ReadonlyArray<{ startMs: number; endMs: number }>,
@@ -475,9 +508,93 @@ export const getAnalysis = queryGeneric({
         };
       });
 
+    // --- discounts ----------------------------------------------------
+    //
+    // ONLY `contracts.discountCents` — the figure an operator typed at
+    // the desk with a reason beside it. A plan's cash terms and a
+    // promotion are folded into the price by the quote and are policy,
+    // not discretion; counting them here would put a staffer's name
+    // against a decision the park made.
+    const inWindow = contracts.filter(
+      (c) =>
+        c.createdAt >= windowStart &&
+        c.createdAt < windowEnd &&
+        CONSUMING_STATES.has(c.state),
+    );
+
+    const sectionOfLot = new Map<string, string>();
+    for (const lot of lots) sectionOfLot.set(lot._id, lot.section);
+
+    const agentLines = new Map<string, DiscountLine>();
+    const sectionLines = new Map<string, DiscountLine>();
+    const reasonCounts = new Map<
+      string,
+      { reason: string; count: number; discountCents: number }
+    >();
+
+    let discountedContracts = 0;
+    let totalDiscountCents = 0;
+    let discountedListCents = 0;
+    let policyContracts = 0;
+
+    for (const c of inWindow) {
+      const discount = c.discountCents ?? 0;
+      const list = c.basePriceCents ?? c.totalPriceCents;
+
+      if (c.paymentPlanId !== undefined || c.promoId !== undefined) {
+        policyContracts += 1;
+      }
+
+      const agentId = c.salesAgentId ?? "none";
+      const agentName =
+        c.salesAgentId !== undefined
+          ? (byAgent.get(c.salesAgentId)?.name ?? "Unknown")
+          : "Not credited";
+      bump(agentLines, agentId, agentName, discount, list);
+
+      const section = sectionOfLot.get(c.lotId) ?? "Unknown garden";
+      bump(sectionLines, section, section, discount, list);
+
+      if (discount <= 0) continue;
+      discountedContracts += 1;
+      totalDiscountCents += discount;
+      discountedListCents += list;
+
+      // Grouped on the exact words typed, normalised for case and
+      // spacing only. Reading MEANING out of free text is how a report
+      // starts inventing categories nobody wrote.
+      const reason = (c.discountReason ?? "").trim().replace(/\s+/g, " ");
+      if (reason.length === 0) continue;
+      const key = reason.toLowerCase();
+      const seen = reasonCounts.get(key);
+      reasonCounts.set(key, {
+        reason: seen?.reason ?? reason,
+        count: (seen?.count ?? 0) + 1,
+        discountCents: (seen?.discountCents ?? 0) + discount,
+      });
+    }
+
+    const discountFacts: DiscountFacts = {
+      windowMonths: ANALYTICS_WINDOW_MONTHS,
+      totalContracts: inWindow.length,
+      discountedContracts,
+      totalDiscountCents,
+      discountedListCents,
+      byAgent: [...agentLines.values()].sort(
+        (a, b) => b.discountCents - a.discountCents,
+      ),
+      bySection: [...sectionLines.values()].sort(
+        (a, b) => b.discountCents - a.discountCents,
+      ),
+      reasons: [...reasonCounts.values()].sort((a, b) => b.count - a.count),
+      policyContracts,
+    };
+
     return {
       agents: analyseAgents(agentFacts),
       phases: analysePhases(phaseFacts),
+      discounts: analyseDiscounts(discountFacts),
+      discountFacts,
       agentFacts,
       phaseFacts,
       windowMonths: ANALYTICS_WINDOW_MONTHS,

@@ -37,7 +37,7 @@ export type InsightLevel =
 
 export type Confidence = "observed" | "indicative" | "speculative";
 
-export type InsightTopic = "agents" | "phases";
+export type InsightTopic = "agents" | "phases" | "discounts";
 
 export interface Insight {
   level: InsightLevel;
@@ -627,4 +627,273 @@ function round1(n: number): number {
 function peso(cents: number): string {
   if (!Number.isFinite(cents)) return "₱0";
   return `₱${Math.round(cents / 100).toLocaleString("en-PH")}`;
+}
+
+// --- discounts ---------------------------------------------------------
+
+/**
+ * What a discount actually costs the park.
+ *
+ * ONLY the discretionary kind is counted here — the figure an operator
+ * typed at the desk with a reason beside it. A cash plan that takes ten
+ * per cent off, or a promotion the park is running deliberately, is
+ * policy: it was decided once, by somebody with the authority, and
+ * reporting it as leakage would put a staffer's name against a decision
+ * the park itself made.
+ *
+ * That distinction is not cosmetic. The whole value of this section is
+ * that it points somewhere, and pointing at the wrong person is worse
+ * than pointing nowhere.
+ */
+export interface DiscountLine {
+  key: string;
+  label: string;
+  /** Contracts written, discounted or not. */
+  contracts: number;
+  discountedContracts: number;
+  /** Sum of the pre-discount price on the discounted ones. */
+  listCents: number;
+  discountCents: number;
+}
+
+export interface DiscountFacts {
+  windowMonths: number;
+  totalContracts: number;
+  discountedContracts: number;
+  totalDiscountCents: number;
+  /** Pre-discount value of the contracts that carried one. */
+  discountedListCents: number;
+  byAgent: DiscountLine[];
+  bySection: DiscountLine[];
+  /** Reasons given, grouped by the exact words typed. */
+  reasons: Array<{ reason: string; count: number; discountCents: number }>;
+  /** Contracts sold under a plan or promotion — policy, not leakage. */
+  policyContracts: number;
+}
+
+/** Below this many contracts, a discount rate is not a pattern. */
+export const MIN_CONTRACTS_TO_JUDGE_DISCOUNTS = 5;
+
+/**
+ * A reason typed this often is a policy in disguise.
+ *
+ * Three of the same sentence is a habit; once is a decision about one
+ * family. The point of flagging it is to move it into the price book,
+ * where it is controlled and reported — not to stop it.
+ */
+export const REPEATED_REASON_THRESHOLD = 3;
+
+export function analyseDiscounts(facts: DiscountFacts): Insight[] {
+  const out: Insight[] = [];
+
+  if (facts.totalContracts === 0) {
+    return [
+      {
+        level: "descriptive",
+        topic: "discounts",
+        headline: "No contracts in the window to read.",
+        detail:
+          "Discounts are measured against contracts written in the last twelve months.",
+        confidence: "observed",
+        basis: "Contracts created inside the analytics window.",
+      },
+    ];
+  }
+
+  const share = Math.round(
+    (facts.discountedContracts / facts.totalContracts) * 100,
+  );
+  const rate = rateOf(facts.discountedListCents, facts.totalDiscountCents);
+
+  out.push({
+    level: "descriptive",
+    topic: "discounts",
+    headline:
+      facts.discountedContracts === 0
+        ? "No discretionary discounts were given."
+        : `${peso(facts.totalDiscountCents)} was given away at the desk.`,
+    detail:
+      facts.discountedContracts === 0
+        ? `None of the ${facts.totalContracts} contracts in the window carried a discount typed at the counter. Any relief given came from a payment plan or a promotion, which is policy rather than discretion.`
+        : `${facts.discountedContracts} of ${facts.totalContracts} contracts (${share}%) carried one, averaging ${round1(rate)}% off the price. This counts only discounts entered by hand — a plan's cash terms and a promotion are policy, and are not in this figure.`,
+    confidence: "observed",
+    basis: `The discount recorded on each contract, over ${facts.windowMonths} months.`,
+  });
+
+  if (facts.discountedContracts === 0) return out;
+
+  out.push(...diagnoseDiscountSpread(facts));
+
+  const repeated = facts.reasons.filter(
+    (r) => r.count >= REPEATED_REASON_THRESHOLD,
+  );
+  if (repeated.length > 0) {
+    const top = repeated[0]!;
+    out.push({
+      level: "diagnostic",
+      topic: "discounts",
+      headline: `The same reason keeps being typed: "${top.reason}".`,
+      detail: `${top.count} contracts carry it, worth ${peso(top.discountCents)}. A discount given that consistently is not discretion, it is a policy nobody has written down — which means it is not capped, not reported as policy, and not necessarily the same amount every time.`,
+      confidence: "indicative",
+      basis: `Identical discount reasons across ${facts.discountedContracts} discounted contracts.`,
+    });
+  }
+
+  out.push(...projectDiscounts(facts));
+  out.push(...prescribeForDiscounts(facts, repeated));
+
+  return out;
+}
+
+function diagnoseDiscountSpread(facts: DiscountFacts): Insight[] {
+  const out: Insight[] = [];
+
+  const judgeable = facts.byAgent.filter(
+    (a) => a.contracts >= MIN_CONTRACTS_TO_JUDGE_DISCOUNTS,
+  );
+
+  if (judgeable.length < 2) {
+    out.push({
+      level: "diagnostic",
+      topic: "discounts",
+      headline: "Not enough contracts per seller to say who discounts most.",
+      detail: `Comparing discount habits needs at least ${MIN_CONTRACTS_TO_JUDGE_DISCOUNTS} contracts each. Below that a single generous sale looks like a pattern — and this is a report that puts a name against money given away.`,
+      confidence: "observed",
+      basis: `${facts.byAgent.length} sellers in the window, ${judgeable.length} with ${MIN_CONTRACTS_TO_JUDGE_DISCOUNTS} or more contracts.`,
+    });
+  } else {
+    const ranked = [...judgeable].sort(
+      (a, b) =>
+        rateOf(b.listCents, b.discountCents) -
+        rateOf(a.listCents, a.discountCents),
+    );
+    const most = ranked[0]!;
+    const least = ranked[ranked.length - 1]!;
+    const mostRate = rateOf(most.listCents, most.discountCents);
+    const leastRate = rateOf(least.listCents, least.discountCents);
+
+    if (mostRate - leastRate >= 2) {
+      out.push({
+        level: "diagnostic",
+        topic: "discounts",
+        headline: `${most.label} discounts hardest — ${round1(mostRate)}% against ${least.label}'s ${round1(leastRate)}%.`,
+        detail: `Over ${most.contracts} contracts that is ${peso(most.discountCents)}. It may have been the right call every time; it may also be a habit nobody has questioned, because each one looked small on its own.`,
+        confidence: "indicative",
+        basis: "Discount as a share of pre-discount value, per seller.",
+      });
+    } else {
+      out.push({
+        level: "diagnostic",
+        topic: "discounts",
+        headline: "Everybody discounts about the same amount.",
+        detail:
+          "No seller stands out. That usually means the discounting is driven by what families ask for rather than by who is at the desk — a pricing question rather than a personnel one.",
+        confidence: "indicative",
+        basis: "Discount rates within two points of each other across sellers.",
+      });
+    }
+  }
+
+  const sections = facts.bySection.filter(
+    (row) => row.contracts >= MIN_CONTRACTS_TO_JUDGE_DISCOUNTS,
+  );
+  if (sections.length >= 2) {
+    const ranked = [...sections].sort(
+      (a, b) =>
+        rateOf(b.listCents, b.discountCents) -
+        rateOf(a.listCents, a.discountCents),
+    );
+    const worst = ranked[0]!;
+    const cheapest = ranked[ranked.length - 1]!;
+    const worstRate = rateOf(worst.listCents, worst.discountCents);
+    const bestRate = rateOf(cheapest.listCents, cheapest.discountCents);
+    if (worstRate - bestRate >= 3) {
+      out.push({
+        level: "diagnostic",
+        topic: "discounts",
+        headline: `${worst.label} needs the most money off to sell — ${round1(worstRate)}% on average.`,
+        detail:
+          "A garden that only moves with a discount is usually priced above what families think it is worth. That is a list-price question, and answering it once is cheaper than answering it at every counter.",
+        confidence: "indicative",
+        basis: "Discount rate by garden, across sellers.",
+      });
+    }
+  }
+
+  return out;
+}
+
+function projectDiscounts(facts: DiscountFacts): Insight[] {
+  if (facts.windowMonths <= 0) return [];
+  const perMonth = facts.totalDiscountCents / facts.windowMonths;
+  const enough = facts.discountedContracts >= MIN_CONTRACTS_TO_JUDGE_DISCOUNTS;
+
+  return [
+    {
+      level: "predictive",
+      topic: "discounts",
+      headline: `At this rate, roughly ${peso(perMonth * 12)} a year.`,
+      detail: enough
+        ? "Straight arithmetic on the last twelve months. It assumes the same mix of families, the same prices and the same habits at the desk — the size of the number is the point here, not its precision."
+        : `Based on only ${facts.discountedContracts} discounted contracts, so read it as an order of magnitude rather than a total.`,
+      confidence: enough ? "indicative" : "speculative",
+      basis: `${peso(facts.totalDiscountCents)} over ${facts.windowMonths} months.`,
+    },
+  ];
+}
+
+function prescribeForDiscounts(
+  facts: DiscountFacts,
+  repeated: Array<{ reason: string; count: number; discountCents: number }>,
+): Insight[] {
+  const out: Insight[] = [];
+
+  if (repeated.length > 0) {
+    const top = repeated[0]!;
+    out.push({
+      level: "prescriptive",
+      topic: "discounts",
+      headline: `Turn "${top.reason}" into a payment plan or a promotion.`,
+      detail:
+        "A discount the park gives routinely belongs in the price book, where it is the same amount every time, shows on every quote, and reports as policy rather than as somebody's discretion. Nothing is taken away from families by doing it — it just stops being invisible.",
+      confidence: "indicative",
+      basis: `${top.count} contracts carrying the same typed reason.`,
+      action: "Add it under Payment plans, then watch this figure fall.",
+    });
+  }
+
+  const rate = rateOf(facts.discountedListCents, facts.totalDiscountCents);
+  if (rate >= 10) {
+    out.push({
+      level: "prescriptive",
+      topic: "discounts",
+      headline: `Discounts average ${round1(rate)}% — worth setting a ceiling.`,
+      detail:
+        "There is a cap on total relief in the settings, and it is a backstop rather than a policy. Lowering it makes the desk ask before going past it, which is a conversation rather than a refusal.",
+      confidence: "indicative",
+      basis: "Average discount as a share of pre-discount value.",
+      action: "Review the maximum discount in the cemetery's settings.",
+    });
+  }
+
+  if (facts.policyContracts === 0 && facts.discountedContracts > 0) {
+    out.push({
+      level: "prescriptive",
+      topic: "discounts",
+      headline: "Every discount so far was typed by hand.",
+      detail:
+        "No sale used a payment plan or a promotion. If the park does have standard terms — a cash discount, an instalment option — putting them in the price book means the desk stops re-deciding them one family at a time.",
+      confidence: "observed",
+      basis: "Contracts with no payment plan or promotion recorded.",
+      action: "Set up the park's standard terms under Payment plans.",
+    });
+  }
+
+  return out;
+}
+
+/** A discount as a share of the pre-discount price, as a percentage. */
+function rateOf(listCents: number, discountCents: number): number {
+  if (listCents <= 0) return 0;
+  return (discountCents / listCents) * 100;
 }
