@@ -162,6 +162,17 @@ interface CollectionFacts {
   overall: CollectionLine;
 }
 
+interface PlanMixLine {
+  key: string;
+  label: string;
+  cashContracts: number;
+  termContracts: number;
+  averageTermMonths: number;
+  averageDepositPercent: number;
+  outstandingCents: number;
+  behindContracts: number;
+}
+
 interface AnalysisResult {
   agents: Insight[];
   phases: Insight[];
@@ -169,6 +180,10 @@ interface AnalysisResult {
   discountFacts: DiscountFacts;
   collections: Insight[];
   collectionFacts: CollectionFacts;
+  planMix: Insight[];
+  planMixFacts: { windowMonths: number; bySection: PlanMixLine[] };
+  timing: Insight[];
+  enquiries: Insight[];
   agentFacts: AgentFacts[];
   phaseFacts: PhaseFacts[];
   windowMonths: number;
@@ -269,6 +284,28 @@ export default function AnalyticsPage(): ReactElement {
             insights={analysis.collections}
           />
           <CollectionTable facts={analysis.collectionFacts} />
+
+          <hr className="border-slate-200" />
+          <InsightPanel
+            title="How each garden is bought"
+            subtitle="Cash or on terms. Two gardens at the same sell-through can be completely different assets."
+            insights={analysis.planMix}
+          />
+          <PlanMixTable rows={analysis.planMixFacts.bySection} />
+
+          <hr className="border-slate-200" />
+          <InsightPanel
+            title="Time to interment"
+            subtitle="How long a lot sits sold and empty — the difference between a park that plans ahead and one that buries this week."
+            insights={analysis.timing}
+          />
+
+          <hr className="border-slate-200" />
+          <InsightPanel
+            title="Enquiries"
+            subtitle="Whether enquiries turn into sales. Linking is done by hand, so every figure here is a floor."
+            insights={analysis.enquiries}
+          />
         </>
       )}
 
@@ -839,6 +876,62 @@ function CollectionTable({ facts }: { facts: CollectionFacts }): ReactElement {
         Instalments not yet due are not a collection failure, so a book
         signed last month is not marked down for being young.
       </p>
+    </div>
+  );
+}
+
+/** The mix behind the garden findings. */
+function PlanMixTable({ rows }: { rows: PlanMixLine[] }): ReactElement {
+  const shown = rows.filter((r) => r.cashContracts + r.termContracts > 0);
+  if (shown.length === 0) return <></>;
+
+  return (
+    <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+      <table className="w-full min-w-[640px] text-sm">
+        <thead>
+          <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wider text-slate-500">
+            <th className="px-4 py-2 font-medium">Garden</th>
+            <th className="px-4 py-2 text-right font-medium">Cash</th>
+            <th className="px-4 py-2 text-right font-medium">On terms</th>
+            <th className="px-4 py-2 text-right font-medium">Avg term</th>
+            <th className="px-4 py-2 text-right font-medium">Avg deposit</th>
+            <th className="px-4 py-2 text-right font-medium">Still owed</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {shown.map((r) => (
+            <tr key={r.key} data-testid="planmix-row" className="text-slate-800">
+              <td className="px-4 py-2.5">
+                {r.label}
+                {r.behindContracts > 0 && (
+                  <span className="ml-2 text-xs text-amber-700">
+                    {r.behindContracts} behind
+                  </span>
+                )}
+              </td>
+              <td className="px-4 py-2.5 text-right tabular-nums">
+                {r.cashContracts}
+              </td>
+              <td className="px-4 py-2.5 text-right tabular-nums">
+                {r.termContracts}
+              </td>
+              <td className="px-4 py-2.5 text-right tabular-nums">
+                {r.termContracts > 0
+                  ? `${Math.round(r.averageTermMonths)} mo`
+                  : "—"}
+              </td>
+              <td className="px-4 py-2.5 text-right tabular-nums">
+                {r.termContracts > 0
+                  ? `${Math.round(r.averageDepositPercent)}%`
+                  : "—"}
+              </td>
+              <td className="px-4 py-2.5 text-right tabular-nums">
+                {r.outstandingCents > 0 ? formatPeso(r.outstandingCents) : "—"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

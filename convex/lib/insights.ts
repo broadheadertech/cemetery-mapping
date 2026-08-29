@@ -41,7 +41,10 @@ export type InsightTopic =
   | "agents"
   | "phases"
   | "discounts"
-  | "collections";
+  | "collections"
+  | "planmix"
+  | "timing"
+  | "enquiries";
 
 export interface Insight {
   level: InsightLevel;
@@ -1168,4 +1171,486 @@ function prescribeForCollections(facts: CollectionFacts): Insight[] {
 export function collectionRate(line: CollectionLine): number {
   if (line.dueToDateCents <= 0) return 0;
   return Math.min(100, (line.paidToDateCents / line.dueToDateCents) * 100);
+}
+
+// --- plan mix ----------------------------------------------------------
+
+/**
+ * How each garden is being bought, and what that commits the park to.
+ *
+ * A sell-through number treats every sale the same. It should not: a
+ * garden sold overwhelmingly on terms is a garden the park has lent
+ * against, and its lots are spoken for years before the money is in.
+ * Two gardens at 70% sold can be completely different assets.
+ *
+ * Read with the collection rate beside it, this is the question of
+ * whether the terms being written in a garden are being honoured — and
+ * that is a decision about deposits, not about the garden.
+ */
+export interface PlanMixLine {
+  key: string;
+  label: string;
+  cashContracts: number;
+  termContracts: number;
+  /** Mean term across the instalment contracts, in months. */
+  averageTermMonths: number;
+  /** Mean deposit as a share of the price, across instalment contracts. */
+  averageDepositPercent: number;
+  /** Still owed on the garden's instalment contracts. */
+  outstandingCents: number;
+  /** Instalment contracts carrying an overdue payment. */
+  behindContracts: number;
+}
+
+export interface PlanMixFacts {
+  windowMonths: number;
+  bySection: PlanMixLine[];
+}
+
+/** Below this many contracts, a garden's mix is not a pattern. */
+export const MIN_CONTRACTS_FOR_MIX = 5;
+
+/** A garden this far into instalments is carrying real exposure. */
+export const TERM_HEAVY_SHARE = 0.7;
+
+export function analysePlanMix(facts: PlanMixFacts): Insight[] {
+  const rows = facts.bySection.filter(
+    (r) => r.cashContracts + r.termContracts > 0,
+  );
+  if (rows.length === 0) {
+    return [
+      {
+        level: "descriptive",
+        topic: "planmix",
+        headline: "No sales to read a mix from.",
+        detail: "This fills in once gardens start selling.",
+        confidence: "observed",
+        basis: "Contracts grouped by the garden their lot sits in.",
+      },
+    ];
+  }
+
+  const out: Insight[] = [];
+  const cash = rows.reduce((t, r) => t + r.cashContracts, 0);
+  const term = rows.reduce((t, r) => t + r.termContracts, 0);
+  const owed = rows.reduce((t, r) => t + r.outstandingCents, 0);
+
+  out.push({
+    level: "descriptive",
+    topic: "planmix",
+    headline: `${term} of ${cash + term} sales were on terms.`,
+    detail:
+      term === 0
+        ? "Everything was paid in full at signing. The park is carrying no instalment exposure at all."
+        : `${peso(owed)} is still owed across them. A garden's sell-through says how much has gone; this says how much of it is actually paid for.`,
+    confidence: "observed",
+    basis: "Contracts grouped by garden and by whether they carry a schedule.",
+  });
+
+  if (term === 0) return out;
+
+  const judgeable = rows.filter(
+    (r) => r.cashContracts + r.termContracts >= MIN_CONTRACTS_FOR_MIX,
+  );
+
+  if (judgeable.length === 0) {
+    out.push({
+      level: "diagnostic",
+      topic: "planmix",
+      headline: "No garden has enough sales to call its mix a pattern.",
+      detail: `A mix needs at least ${MIN_CONTRACTS_FOR_MIX} contracts before it says anything about the garden rather than about the last few families.`,
+      confidence: "observed",
+      basis: `${rows.length} gardens with sales, none at ${MIN_CONTRACTS_FOR_MIX} contracts.`,
+    });
+    return out;
+  }
+
+  const termHeavy = judgeable
+    .filter(
+      (r) =>
+        r.termContracts / (r.cashContracts + r.termContracts) >=
+        TERM_HEAVY_SHARE,
+    )
+    .sort((a, b) => b.outstandingCents - a.outstandingCents);
+
+  if (termHeavy.length > 0) {
+    const worst = termHeavy[0]!;
+    const share = Math.round(
+      (worst.termContracts / (worst.cashContracts + worst.termContracts)) * 100,
+    );
+    out.push({
+      level: "diagnostic",
+      topic: "planmix",
+      headline: `${worst.label} is ${share}% sold on terms — ${peso(worst.outstandingCents)} of it still owed.`,
+      detail: `Average ${Math.round(worst.averageTermMonths)} months at a ${Math.round(worst.averageDepositPercent)}% deposit. Those lots are spoken for and cannot be resold, but the money is years away. If that garden's collection is also weak, the sell-through figure is flattering it.`,
+      confidence: "indicative",
+      basis: "Share of a garden's contracts carrying an instalment schedule.",
+    });
+
+    if (worst.behindContracts > 0) {
+      out.push({
+        level: "diagnostic",
+        topic: "planmix",
+        headline: `${worst.behindContracts} of those are already behind.`,
+        detail:
+          "A garden that sells on long terms to families who then fall behind is not selling well — it is accumulating lots it will have to reclaim and sell twice.",
+        confidence: "indicative",
+        basis: "Instalment contracts with an overdue payment, by garden.",
+      });
+    }
+  }
+
+  const deposits = judgeable.filter((r) => r.termContracts > 0);
+  if (deposits.length >= 2) {
+    const sorted = [...deposits].sort(
+      (a, b) => a.averageDepositPercent - b.averageDepositPercent,
+    );
+    const thinnest = sorted[0]!;
+    const thickest = sorted[sorted.length - 1]!;
+    if (thickest.averageDepositPercent - thinnest.averageDepositPercent >= 10) {
+      out.push({
+        level: "diagnostic",
+        topic: "planmix",
+        headline: `Deposits differ sharply by garden — ${Math.round(thinnest.averageDepositPercent)}% in ${thinnest.label} against ${Math.round(thickest.averageDepositPercent)}% in ${thickest.label}.`,
+        detail:
+          "The deposit is the single best predictor of whether an instalment contract is honoured. A garden being sold on thin deposits is a garden being sold to families the park is lending to hardest.",
+        confidence: "indicative",
+        basis: "Average deposit as a share of price, per garden.",
+      });
+    }
+  }
+
+  out.push({
+    level: "predictive",
+    topic: "planmix",
+    headline: `${peso(owed)} is committed to arrive over the coming years.`,
+    detail:
+      "That is the contracted amount, not a forecast of what will be collected — the collections section is where that question is answered. It is the size of the book the park is carrying.",
+    confidence: "indicative",
+    basis: "Unpaid principal across every live instalment contract.",
+  });
+
+  if (termHeavy.length > 0) {
+    const worst = termHeavy[0]!;
+    out.push({
+      level: "prescriptive",
+      topic: "planmix",
+      headline: `Consider a higher deposit on the plans reached for in ${worst.label}.`,
+      detail:
+        "Raising a deposit costs the park nothing and changes who signs. It is the cheapest lever on default risk there is, and it works before the problem rather than after it.",
+      confidence: "indicative",
+      basis: "The garden carrying the most outstanding instalment value.",
+      action: "Review the deposit on the instalment plans under Payment plans.",
+    });
+  }
+
+  return out;
+}
+
+// --- time to interment -------------------------------------------------
+
+/**
+ * How long a lot sits sold and empty.
+ *
+ * A memorial park sells two different things wearing the same name. A
+ * pre-need sale is a family planning ahead — years, sometimes decades,
+ * of care with no interment. An at-need sale happens because somebody
+ * has died this week.
+ *
+ * Both are lots sold. They are not the same business: one commits the
+ * park to maintenance long before the ground is used, and the other
+ * arrives with the work attached.
+ */
+export interface IntermentTimingFacts {
+  /** Lots sold and never yet interred in. */
+  soldEmptyLots: number;
+  /** Of those, how many have been waiting over five years. */
+  longEmptyLots: number;
+  /** Lots with at least one completed interment. */
+  usedLots: number;
+  /**
+   * Days between contract and first interment, for lots that have been
+   * used. Sorted ascending by the caller.
+   */
+  daysToFirstInterment: number[];
+  /** Interments completed inside the analytics window. */
+  intermentsInWindow: number;
+  windowMonths: number;
+}
+
+/** At or under this many days, the sale was driven by a death. */
+export const AT_NEED_DAYS = 30;
+
+export function analyseIntermentTiming(
+  facts: IntermentTimingFacts,
+): Insight[] {
+  const out: Insight[] = [];
+  const used = facts.daysToFirstInterment.length;
+
+  if (used === 0 && facts.soldEmptyLots === 0) {
+    return [
+      {
+        level: "descriptive",
+        topic: "timing",
+        headline: "No sold lots to read yet.",
+        detail: "This fills in once lots are sold and interred in.",
+        confidence: "observed",
+        basis: "Lots with a contract against them.",
+      },
+    ];
+  }
+
+  const atNeed = facts.daysToFirstInterment.filter(
+    (d) => d <= AT_NEED_DAYS,
+  ).length;
+  const atNeedShare = used > 0 ? Math.round((atNeed / used) * 100) : 0;
+
+  out.push({
+    level: "descriptive",
+    topic: "timing",
+    headline: `${facts.soldEmptyLots} lots are sold and still empty.`,
+    detail:
+      used === 0
+        ? "None has been interred in yet, so there is no waiting time to measure."
+        : `Of the ${used} that have been used, the middle one waited ${describeDays(median(facts.daysToFirstInterment))} between the sale and the burial. ${atNeedShare}% were used within a month of being bought.`,
+    confidence: "observed",
+    basis: "Time between a lot's contract and its first completed interment.",
+  });
+
+  if (used === 0) return out;
+
+  // --- what kind of park is this ---------------------------------------
+  if (atNeedShare >= 60) {
+    out.push({
+      level: "diagnostic",
+      topic: "timing",
+      headline: "This park sells mostly at need.",
+      detail: `${atNeedShare}% of lots are used within a month of purchase — families are buying because somebody has died, not because they are planning. That means sales follow deaths rather than marketing, and the interment work arrives with the sale rather than years later.`,
+      confidence: "indicative",
+      basis: `Interments within ${AT_NEED_DAYS} days of the contract.`,
+    });
+  } else if (atNeedShare <= 25) {
+    out.push({
+      level: "diagnostic",
+      topic: "timing",
+      headline: "This park sells mostly ahead of need.",
+      detail: `Only ${atNeedShare}% of lots are used within a month. Families are planning, which is the better business — but it means the park is carrying maintenance on ${facts.soldEmptyLots} lots that generate no interment work, and will for years.`,
+      confidence: "indicative",
+      basis: `Interments within ${AT_NEED_DAYS} days of the contract.`,
+    });
+  }
+
+  if (facts.longEmptyLots > 0) {
+    out.push({
+      level: "diagnostic",
+      topic: "timing",
+      headline: `${facts.longEmptyLots} lots have been sold and empty for over five years.`,
+      detail:
+        "Every one is being maintained, and the families holding them may have moved, died elsewhere, or lost the paperwork. It is worth knowing which — a lot nobody can be contacted about is a problem that only gets harder.",
+      confidence: "indicative",
+      basis: "Sold lots with no interment, by age of contract.",
+    });
+  }
+
+  // --- the work ahead ---------------------------------------------------
+  const perYear = facts.intermentsInWindow * (12 / Math.max(1, facts.windowMonths));
+  out.push({
+    level: "predictive",
+    topic: "timing",
+    headline: `About ${Math.round(perYear)} interments a year at the current rate.`,
+    detail: `${facts.soldEmptyLots} sold lots are still to be used at some point. When they are used depends on when people die, which nothing here predicts — this is the recent rate, not a projection of the backlog.`,
+    confidence: facts.intermentsInWindow >= 10 ? "indicative" : "speculative",
+    basis: `Completed interments over ${facts.windowMonths} months.`,
+  });
+
+  // --- what to do -------------------------------------------------------
+  if (facts.longEmptyLots > 0) {
+    out.push({
+      level: "prescriptive",
+      topic: "timing",
+      headline: "Check you can still reach the families on the oldest empty lots.",
+      detail:
+        "A contact detail that was current a decade ago usually is not. Finding out now is a letter; finding out when somebody dies is a problem in front of a grieving family.",
+      confidence: "observed",
+      basis: "Sold lots with no interment after five years.",
+      action: "Pull the oldest empty lots and try the contact on file.",
+    });
+  }
+
+  if (atNeedShare <= 25 && facts.soldEmptyLots > 0) {
+    out.push({
+      level: "prescriptive",
+      topic: "timing",
+      headline: "Check perpetual care actually covers the wait.",
+      detail: `The park is maintaining ${facts.soldEmptyLots} lots that were paid for once and may not be used for decades. Perpetual care is what funds that, and it was priced against an assumption about how long the wait is — this number is that assumption, measured.`,
+      confidence: "indicative",
+      basis: "Sold-but-empty lots against the measured time to interment.",
+      action: "Compare the perpetual-care policy against the waiting time above.",
+    });
+  }
+
+  return out;
+}
+
+// --- enquiries ---------------------------------------------------------
+
+/**
+ * How many enquiries turn into sales.
+ *
+ * With one large caveat that the findings repeat, because it decides
+ * whether the number means anything: an enquiry is linked to a contract
+ * BY HAND. Nobody has to do it, and a sale recorded without the link
+ * looks exactly like an enquiry that went nowhere.
+ *
+ * So the rate is a FLOOR, never a truth. A park reading it as a truth
+ * concludes its marketing is failing when in fact its desk is not
+ * ticking a box, and that is a genuinely expensive misreading.
+ */
+export interface EnquiryFacts {
+  windowMonths: number;
+  total: number;
+  /** Linked to a contract. */
+  converted: number;
+  /** Still `new` — nobody has picked them up. */
+  untouched: number;
+  /** Contacted but not closed and not converted. */
+  open: number;
+  /** Days from enquiry to the contract, for the ones that converted. */
+  daysToConvert: number[];
+  byKind: Array<{ kind: string; total: number; converted: number }>;
+  /** Contracts written in the window with no enquiry linked. */
+  unlinkedContracts: number;
+}
+
+export function analyseEnquiries(facts: EnquiryFacts): Insight[] {
+  if (facts.total === 0) {
+    return [
+      {
+        level: "descriptive",
+        topic: "enquiries",
+        headline: "No enquiries in the window.",
+        detail:
+          "Enquiries come in from the public pages — a visit request or a pricing question.",
+        confidence: "observed",
+        basis: "Enquiries received in the last twelve months.",
+      },
+    ];
+  }
+
+  const out: Insight[] = [];
+  const rate = Math.round((facts.converted / facts.total) * 100);
+
+  out.push({
+    level: "descriptive",
+    topic: "enquiries",
+    headline: `${facts.converted} of ${facts.total} enquiries are linked to a sale — at least ${rate}%.`,
+    detail: `"At least" is the important part. Linking an enquiry to its contract is done by hand at the desk, so a sale that nobody linked looks the same as an enquiry that went nowhere. ${facts.unlinkedContracts} contracts in the window carry no enquiry at all — some of those will have come from one.`,
+    confidence: "observed",
+    basis: "Enquiries with a contract recorded against them.",
+  });
+
+  // --- the caveat, as its own finding ----------------------------------
+  if (facts.unlinkedContracts > facts.converted) {
+    out.push({
+      level: "diagnostic",
+      topic: "enquiries",
+      headline: "This rate is probably understating the truth.",
+      detail: `More contracts were written without an enquiry linked (${facts.unlinkedContracts}) than with one (${facts.converted}). Before reading anything into the conversion rate, it is worth knowing whether the desk is linking at all — otherwise this measures the habit rather than the marketing.`,
+      confidence: "indicative",
+      basis: "Contracts with no enquiry against them, in the same window.",
+    });
+  }
+
+  if (facts.untouched > 0) {
+    out.push({
+      level: "diagnostic",
+      topic: "enquiries",
+      headline: `${facts.untouched} enquiries have never been picked up.`,
+      detail:
+        "They are still marked new. Whatever the conversion rate is, these were never given a chance to convert, and somebody asked the park a question that nobody answered.",
+      confidence: "observed",
+      basis: "Enquiries still in the `new` state.",
+    });
+  }
+
+  const kinds = facts.byKind.filter((k) => k.total >= 5);
+  if (kinds.length >= 2) {
+    const sorted = [...kinds].sort(
+      (a, b) => b.converted / b.total - a.converted / a.total,
+    );
+    const best = sorted[0]!;
+    const worst = sorted[sorted.length - 1]!;
+    const bestRate = Math.round((best.converted / best.total) * 100);
+    const worstRate = Math.round((worst.converted / worst.total) * 100);
+    if (bestRate - worstRate >= 15) {
+      out.push({
+        level: "diagnostic",
+        topic: "enquiries",
+        headline: `${best.kind} enquiries convert better — ${bestRate}% against ${worstRate}%.`,
+        detail:
+          "Somebody asking to visit has already decided to take the park seriously; somebody asking a price may be comparing four of them. Worth knowing which the park is attracting, and which it answers fastest.",
+        confidence: "indicative",
+        basis: "Conversion by enquiry kind, where each has at least five.",
+      });
+    }
+  }
+
+  if (facts.daysToConvert.length >= 3) {
+    out.push({
+      level: "predictive",
+      topic: "enquiries",
+      headline: `An enquiry that converts takes about ${describeDays(median(facts.daysToConvert))}.`,
+      detail: `On that timing, the ${facts.open} enquiries currently open have not necessarily gone cold. It is a median of ${facts.daysToConvert.length} linked sales, so treat it as a rough sense of the sales cycle rather than a deadline.`,
+      confidence: facts.daysToConvert.length >= 10 ? "indicative" : "speculative",
+      basis: `Days between enquiry and contract across ${facts.daysToConvert.length} linked sales.`,
+    });
+  }
+
+  if (facts.untouched > 0) {
+    out.push({
+      level: "prescriptive",
+      topic: "enquiries",
+      headline: `Answer the ${facts.untouched} enquiries nobody has touched.`,
+      detail:
+        "These cost nothing to chase and somebody already raised their hand. It is the cheapest thing on this page.",
+      confidence: "observed",
+      basis: "Enquiries still in the `new` state.",
+      action: "Work the enquiries list.",
+    });
+  }
+
+  if (facts.unlinkedContracts > facts.converted) {
+    out.push({
+      level: "prescriptive",
+      topic: "enquiries",
+      headline: "Ask the desk to link a sale to its enquiry.",
+      detail:
+        "One field on the sale form. Until it is filled in routinely, every number in this section is a floor and the park cannot tell a marketing problem from a paperwork one.",
+      confidence: "observed",
+      basis: "The proportion of contracts carrying no enquiry.",
+      action: "Use the enquiry field on the sale form when a sale came from one.",
+    });
+  }
+
+  return out;
+}
+
+// --- shared helpers for the three ---------------------------------------
+
+/** Middle value of a sorted-or-unsorted list. Zero when empty. */
+function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? Math.round(((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2)
+    : (sorted[mid] ?? 0);
+}
+
+/** Days as something a person would say out loud. */
+function describeDays(days: number): string {
+  if (days < 1) return "the same day";
+  if (days < 60) return `${Math.round(days)} days`;
+  if (days < 730) return `${Math.round(days / 30)} months`;
+  return `${round1(days / 365)} years`;
 }

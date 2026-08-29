@@ -41,12 +41,19 @@ import {
   analyseAgents,
   analyseCollections,
   analyseDiscounts,
+  analyseEnquiries,
+  analyseIntermentTiming,
+  analysePlanMix,
   analysePhases,
   type AgentFacts,
   type CollectionFacts,
   type CollectionLine,
   type DiscountFacts,
   type DiscountLine,
+  type EnquiryFacts,
+  type IntermentTimingFacts,
+  type PlanMixFacts,
+  type PlanMixLine,
   type Insight,
   type PhaseFacts,
 } from "./lib/insights";
@@ -145,6 +152,12 @@ export interface AnalysisResult {
   discountFacts: DiscountFacts;
   collections: Insight[];
   collectionFacts: CollectionFacts;
+  planMix: Insight[];
+  planMixFacts: PlanMixFacts;
+  timing: Insight[];
+  timingFacts: IntermentTimingFacts;
+  enquiries: Insight[];
+  enquiryFacts: EnquiryFacts;
   /** The facts the agent findings were computed from, for the table. */
   agentFacts: AgentFacts[];
   /** The facts the phase findings were computed from, for the table. */
@@ -326,6 +339,12 @@ export const getInventoryAnalytics = queryGeneric({
     };
   },
 });
+
+/** Mean of a list, zero when empty. */
+function mean(values: number[]): number {
+  if (values.length === 0) return 0;
+  return values.reduce((t, n) => t + n, 0) / values.length;
+}
 
 /** An empty collection line, ready to accumulate into. */
 function blankCollection(key: string, label: string): CollectionLine {
@@ -691,6 +710,191 @@ export const getAnalysis = queryGeneric({
       overall,
     };
 
+    // --- plan mix by garden -------------------------------------------
+    //
+    // A sell-through number treats every sale the same. It should not:
+    // a garden sold overwhelmingly on terms is one the park has lent
+    // against, and its lots are spoken for years before the money is in.
+    const mixLines = new Map<string, PlanMixLine>();
+    const termAccum = new Map<
+      string,
+      { months: number[]; depositPercents: number[] }
+    >();
+
+    for (const c of contracts) {
+      if (c.state === "voided" || c.state === "cancelled") continue;
+      const section = sectionOfLot.get(c.lotId) ?? "Unknown garden";
+      const row =
+        mixLines.get(section) ?? {
+          key: section,
+          label: section,
+          cashContracts: 0,
+          termContracts: 0,
+          averageTermMonths: 0,
+          averageDepositPercent: 0,
+          outstandingCents: 0,
+          behindContracts: 0,
+        };
+      const acc =
+        termAccum.get(section) ?? { months: [], depositPercents: [] };
+
+      if (c.kind === "installment") {
+        row.termContracts += 1;
+        if (c.termMonths !== undefined) acc.months.push(c.termMonths);
+        if (c.downPaymentCents !== undefined && c.totalPriceCents > 0) {
+          acc.depositPercents.push(
+            (c.downPaymentCents / c.totalPriceCents) * 100,
+          );
+        }
+        const installments = await ctx.db
+          .query("installments")
+          .withIndex("by_contract", (q) => q.eq("contractId", c._id))
+          .collect();
+        let behind = false;
+        for (const i of installments) {
+          if (i.status === "waived") continue;
+          row.outstandingCents += Math.max(0, i.principalCents - i.paidCents);
+          if (i.status === "overdue") behind = true;
+        }
+        if (behind) row.behindContracts += 1;
+      } else {
+        row.cashContracts += 1;
+      }
+
+      mixLines.set(section, row);
+      termAccum.set(section, acc);
+    }
+
+    for (const [section, acc] of termAccum) {
+      const row = mixLines.get(section);
+      if (row === undefined) continue;
+      row.averageTermMonths = mean(acc.months);
+      row.averageDepositPercent = mean(acc.depositPercents);
+    }
+
+    const planMixFacts: PlanMixFacts = {
+      windowMonths: ANALYTICS_WINDOW_MONTHS,
+      bySection: [...mixLines.values()].sort(
+        (a, b) => b.outstandingCents - a.outstandingCents,
+      ),
+    };
+
+    // --- how long a lot sits sold and empty ---------------------------
+    //
+    // A pre-need sale and an at-need sale are the same row in the
+    // contracts table and completely different businesses. The gap
+    // between the contract and the first burial is what tells them
+    // apart.
+    const FIVE_YEARS_MS = 5 * 365 * 24 * 3600 * 1000;
+    const firstIntermentByLot = new Map<string, number>();
+    const allInterments = await ctx.db.query("interments").collect();
+    let intermentsInWindow = 0;
+    for (const it of allInterments) {
+      if (it.status !== "completed") continue;
+      const at = it.completedAt ?? it.scheduledAt;
+      const seen = firstIntermentByLot.get(it.lotId);
+      if (seen === undefined || at < seen) {
+        firstIntermentByLot.set(it.lotId, at);
+      }
+      if (at >= windowStart && at < windowEnd) intermentsInWindow += 1;
+    }
+
+    // Earliest contract per lot — a lot resold after a reclaim should
+    // measure from the sale that led to the burial, and the first one
+    // is the closest honest answer without a per-interment link.
+    const firstContractByLot = new Map<string, number>();
+    for (const c of contracts) {
+      if (c.state === "voided" || c.state === "cancelled") continue;
+      const seen = firstContractByLot.get(c.lotId);
+      if (seen === undefined || c.createdAt < seen) {
+        firstContractByLot.set(c.lotId, c.createdAt);
+      }
+    }
+
+    let soldEmptyLots = 0;
+    let longEmptyLots = 0;
+    const daysToFirstInterment: number[] = [];
+    for (const [lotId, soldAt] of firstContractByLot) {
+      const interredAt = firstIntermentByLot.get(lotId);
+      if (interredAt === undefined) {
+        soldEmptyLots += 1;
+        if (now - soldAt >= FIVE_YEARS_MS) longEmptyLots += 1;
+        continue;
+      }
+      // A burial recorded before the contract is a data oddity, not a
+      // negative wait. Floored at zero rather than dropped, because the
+      // lot WAS used and dropping it would flatter the at-need share.
+      daysToFirstInterment.push(
+        Math.max(0, Math.round((interredAt - soldAt) / (24 * 3600 * 1000))),
+      );
+    }
+
+    const timingFacts: IntermentTimingFacts = {
+      soldEmptyLots,
+      longEmptyLots,
+      usedLots: daysToFirstInterment.length,
+      daysToFirstInterment,
+      intermentsInWindow,
+      windowMonths: ANALYTICS_WINDOW_MONTHS,
+    };
+
+    // --- enquiries ----------------------------------------------------
+    const enquiries = (await ctx.db.query("enquiries").collect()).filter(
+      (e) => e.createdAt >= windowStart && e.createdAt < windowEnd,
+    );
+    const contractByEnquiry = new Map<string, number>();
+    let unlinkedContracts = 0;
+    for (const c of inWindow) {
+      if (c.enquiryId === undefined) {
+        unlinkedContracts += 1;
+        continue;
+      }
+      const seen = contractByEnquiry.get(c.enquiryId);
+      if (seen === undefined || c.createdAt < seen) {
+        contractByEnquiry.set(c.enquiryId, c.createdAt);
+      }
+    }
+
+    const kindTotals = new Map<string, { total: number; converted: number }>();
+    const daysToConvert: number[] = [];
+    let converted = 0;
+    let untouched = 0;
+    let open = 0;
+
+    for (const e of enquiries) {
+      const kind = kindTotals.get(e.kind) ?? { total: 0, converted: 0 };
+      kind.total += 1;
+
+      const soldAt = contractByEnquiry.get(e._id);
+      if (soldAt !== undefined) {
+        converted += 1;
+        kind.converted += 1;
+        daysToConvert.push(
+          Math.max(0, Math.round((soldAt - e.createdAt) / (24 * 3600 * 1000))),
+        );
+      } else if (e.status === "new") {
+        untouched += 1;
+      } else if (e.status !== "closed") {
+        open += 1;
+      }
+      kindTotals.set(e.kind, kind);
+    }
+
+    const enquiryFacts: EnquiryFacts = {
+      windowMonths: ANALYTICS_WINDOW_MONTHS,
+      total: enquiries.length,
+      converted,
+      untouched,
+      open,
+      daysToConvert,
+      byKind: [...kindTotals.entries()].map(([kind, v]) => ({
+        kind,
+        total: v.total,
+        converted: v.converted,
+      })),
+      unlinkedContracts,
+    };
+
     return {
       agents: analyseAgents(agentFacts),
       phases: analysePhases(phaseFacts),
@@ -698,6 +902,12 @@ export const getAnalysis = queryGeneric({
       discountFacts,
       collections: analyseCollections(collectionFacts),
       collectionFacts,
+      planMix: analysePlanMix(planMixFacts),
+      planMixFacts,
+      timing: analyseIntermentTiming(timingFacts),
+      timingFacts,
+      enquiries: analyseEnquiries(enquiryFacts),
+      enquiryFacts,
       agentFacts,
       phaseFacts,
       windowMonths: ANALYTICS_WINDOW_MONTHS,

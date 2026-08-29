@@ -96,6 +96,9 @@ type RecordFullPaymentSaleArgs = {
   // Who to credit. An id only; the commission amount is never sent from
   // the client — it is money leaving the park.
   salesAgentId?: string;
+  // Where the sale came from. Optional; without it the conversion
+  // analytics can only report a floor.
+  enquiryId?: string;
 };
 
 interface PreviewPerpetualCareResult {
@@ -107,6 +110,7 @@ interface PreviewPerpetualCareResult {
 
 import { PlanPicker, type QuoteOption } from "./PlanPicker";
 import { AgentPicker } from "./AgentPicker";
+import { EnquiryPicker } from "./EnquiryPicker";
 
 const previewPerpetualCareRef = makeFunctionReference<
   "query",
@@ -178,6 +182,8 @@ export function SaleForm({ userRoles = [], initialLotId }: SaleFormProps) {
    * an id and never an amount.
    */
   const [salesAgentId, setSalesAgentId] = useState("");
+  /** The enquiry this sale came from, when the desk knows of one. */
+  const [enquiryId, setEnquiryId] = useState("");
   const [previewOpen, setPreviewOpen] = useState(false);
   const [isCommitting, setIsCommitting] = useState(false);
   const [commitError, setCommitError] = useState<string | null>(null);
@@ -420,6 +426,9 @@ export function SaleForm({ userRoles = [], initialLotId }: SaleFormProps) {
       if (salesAgentId.length > 0) {
         args.salesAgentId = salesAgentId;
       }
+      if (enquiryId.length > 0) {
+        args.enquiryId = enquiryId;
+      }
       // Story 3.8 (FR25) — perpetual care is policy-driven; the server
       // derives the fee from `cemeterySettings.perpetualCarePolicy` at
       // sale-time using the lot's `lotType`. The client no longer
@@ -650,6 +659,8 @@ export function SaleForm({ userRoles = [], initialLotId }: SaleFormProps) {
             onChange={setSalesAgentId}
             totalCents={totalWithAddons}
           />
+
+          <EnquiryPicker value={enquiryId} onChange={setEnquiryId} />
 
           <div className="space-y-1">
             <label

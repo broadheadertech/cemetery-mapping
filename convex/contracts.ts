@@ -197,6 +197,8 @@ export interface RecordFullPaymentSaleArgs {
    */
   salesAgentId?: string;
   commissionPercent?: number;
+  /** The enquiry this sale came from, when one was recorded. */
+  enquiryId?: string;
 }
 
 /**
@@ -610,6 +612,10 @@ export const recordFullPaymentSale = mutationGeneric({
     // contract; the client never sends a commission amount.
     salesAgentId: v.optional(v.id("salesAgents")),
     commissionPercent: v.optional(v.number()),
+    // Where the sale came from, when the desk knows. Optional, and the
+    // conversion analytics is explicit that an unlinked sale looks the
+    // same as an enquiry that went nowhere.
+    enquiryId: v.optional(v.id("enquiries")),
     // Story 2.9 (FR15 brand-tier extension) — optional estate-mode FK.
     familyEstateId: v.optional(v.id("familyEstates")),
   },
@@ -892,6 +898,18 @@ export const recordFullPaymentSale = mutationGeneric({
     contractRow.salesAgentId = commission.salesAgentId;
     contractRow.commissionPercent = commission.percent;
     contractRow.commissionCents = commission.cents;
+    if (args.enquiryId !== undefined) {
+      const enquiry = await ctx.db.get(
+        args.enquiryId as unknown as DataModel["enquiries"]["document"]["_id"],
+      );
+      if (enquiry === null) {
+        throwError(ErrorCode.NOT_FOUND, "That enquiry no longer exists.", {
+          enquiryId: args.enquiryId,
+        });
+      }
+      contractRow.enquiryId =
+        args.enquiryId as unknown as DataModel["enquiries"]["document"]["_id"];
+    }
     const contractId = await ctx.db.insert("contracts", contractRow);
 
     // Step 5: Transition the lot from `available` to `sold`. The helper
@@ -1106,6 +1124,8 @@ export interface RecordInstallmentSaleArgs {
    */
   salesAgentId?: string;
   commissionPercent?: number;
+  /** The enquiry this sale came from, when one was recorded. */
+  enquiryId?: string;
 }
 
 /**
@@ -1260,6 +1280,10 @@ export const recordInstallmentSale = mutationGeneric({
     // contract; the client never sends a commission amount.
     salesAgentId: v.optional(v.id("salesAgents")),
     commissionPercent: v.optional(v.number()),
+    // Where the sale came from, when the desk knows. Optional, and the
+    // conversion analytics is explicit that an unlinked sale looks the
+    // same as an enquiry that went nowhere.
+    enquiryId: v.optional(v.id("enquiries")),
     // Story 2.9 (FR15 brand-tier extension) — optional estate-mode FK.
     familyEstateId: v.optional(v.id("familyEstates")),
   },
@@ -1831,6 +1855,18 @@ export const recordInstallmentSale = mutationGeneric({
     contractRow.salesAgentId = commission.salesAgentId;
     contractRow.commissionPercent = commission.percent;
     contractRow.commissionCents = commission.cents;
+    if (args.enquiryId !== undefined) {
+      const enquiry = await ctx.db.get(
+        args.enquiryId as unknown as DataModel["enquiries"]["document"]["_id"],
+      );
+      if (enquiry === null) {
+        throwError(ErrorCode.NOT_FOUND, "That enquiry no longer exists.", {
+          enquiryId: args.enquiryId,
+        });
+      }
+      contractRow.enquiryId =
+        args.enquiryId as unknown as DataModel["enquiries"]["document"]["_id"];
+    }
     const contractId = await ctx.db.insert("contracts", contractRow);
 
     // Step 6: Transition the lot from `available` to `sold`. A concurrent

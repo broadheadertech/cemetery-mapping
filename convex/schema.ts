@@ -1197,6 +1197,15 @@ export default defineSchema({
     salesAgentId: v.optional(v.id("salesAgents")),
     commissionPercent: v.optional(v.number()),
     commissionCents: v.optional(v.number()),
+    /**
+     * The enquiry this sale came from, when the desk recorded one.
+     *
+     * Optional and filled in by hand, which is the whole caveat on
+     * every conversion figure derived from it: a sale nobody linked
+     * looks exactly like an enquiry that went nowhere. The analytics
+     * says so rather than reporting the rate as a truth.
+     */
+    enquiryId: v.optional(v.id("enquiries")),
     commissionPaidOutAt: v.optional(v.number()),
     commissionPaidOutByUserId: v.optional(v.id("users")),
     commissionPayoutNote: v.optional(v.string()),
@@ -1352,6 +1361,7 @@ export default defineSchema({
     .index("by_customer", ["customerId"])
     .index("by_state", ["state"])
     .index("by_contractNumber", ["contractNumber"])
+    .index("by_enquiry", ["enquiryId"])
     // Story 2.9 — AR aging rollup needs to find every contract bound to
     // an estate quickly. The index pairs `familyEstateId` with `state`
     // so the aging recompute can filter to active / in-default rows in
