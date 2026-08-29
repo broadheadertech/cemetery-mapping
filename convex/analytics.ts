@@ -37,9 +37,19 @@ import {
   type Runway,
 } from "./lib/absorption";
 import { computeTrailingMonthBounds } from "./trends";
+import {
+  analyseAgents,
+  analysePhases,
+  type AgentFacts,
+  type Insight,
+  type PhaseFacts,
+} from "./lib/insights";
+import { commissionStatus } from "./lib/commission";
+import { readAppSettings } from "./reports";
 
 type DataModel = DataModelFromSchemaDefinition<typeof schema>;
 type PhaseId = DataModel["phases"]["document"]["_id"];
+type ContractId = DataModel["contracts"]["document"]["_id"];
 
 /** A year of history — long enough to see a season, short enough to be current. */
 export const ANALYTICS_WINDOW_MONTHS = 12;
@@ -109,6 +119,27 @@ export interface InventoryAnalytics {
   phaseChecks: PhaseCheck[];
 
   intermentsInWindow: number;
+  generatedAtMs: number;
+}
+
+/**
+ * The four levels, over the two questions the park asked for: which
+ * agents earn most and least, and which phases sell fastest and
+ * slowest.
+ *
+ * A separate query from the inventory one because it is a separate
+ * question and a heavier read — it walks contracts and their
+ * collections. A screen that only wants the runway should not pay for
+ * this.
+ */
+export interface AnalysisResult {
+  agents: Insight[];
+  phases: Insight[];
+  /** The facts the agent findings were computed from, for the table. */
+  agentFacts: AgentFacts[];
+  /** The facts the phase findings were computed from, for the table. */
+  phaseFacts: PhaseFacts[];
+  windowMonths: number;
   generatedAtMs: number;
 }
 
@@ -296,4 +327,182 @@ function bucketIndexOf(
     if (ms >= b.startMs && ms < b.endMs) return i;
   }
   return -1;
+}
+
+/**
+ * The four levels, read off real contracts.
+ *
+ * Admin-only. It names individual agents beside what they earn, which
+ * is a payroll-shaped view even though every figure in it is already
+ * elsewhere in the system.
+ */
+export const getAnalysis = queryGeneric({
+  args: {},
+  handler: async (ctx: QueryCtx): Promise<AnalysisResult> => {
+    await requireRole(ctx, ["admin"]);
+
+    const now = Date.now();
+    const buckets = computeTrailingMonthBounds(now, ANALYTICS_WINDOW_MONTHS);
+    const windowStart = buckets[0]?.startMs ?? now;
+    const windowEnd = buckets[buckets.length - 1]?.endMs ?? now;
+
+    const { commissionEarnedAtPercent } = await readAppSettings(ctx);
+    const contracts = await ctx.db.query("contracts").collect();
+
+    // --- agents ------------------------------------------------------
+    const agents = await ctx.db.query("salesAgents").collect();
+    const byAgent = new Map<string, AgentFacts>();
+    for (const a of agents) {
+      byAgent.set(a._id, {
+        agentId: a._id,
+        name: a.fullName,
+        isSystem: a.isSystem === true,
+        salesCount: 0,
+        soldValueCents: 0,
+        commissionCents: 0,
+        commissionDueCents: 0,
+        commissionNotDueCents: 0,
+        activeMonths: 1,
+      });
+    }
+
+    // First and last sale per agent, to measure how long they have
+    // actually been selling. An agent who joined in September has three
+    // months of history, not twelve, and averaging over twelve would
+    // divide their rate by four.
+    const span = new Map<string, { first: number; last: number }>();
+
+    for (const c of contracts) {
+      if (c.salesAgentId === undefined) continue;
+      const facts = byAgent.get(c.salesAgentId);
+      if (facts === undefined) continue;
+
+      facts.salesCount += 1;
+      facts.soldValueCents += c.totalPriceCents;
+      facts.commissionCents += c.commissionCents ?? 0;
+
+      const seen = span.get(c.salesAgentId);
+      span.set(c.salesAgentId, {
+        first: Math.min(seen?.first ?? c.createdAt, c.createdAt),
+        last: Math.max(seen?.last ?? c.createdAt, c.createdAt),
+      });
+
+      if ((c.commissionCents ?? 0) > 0) {
+        const paidCents = await sumInstallmentsPaid(ctx, c);
+        const status = commissionStatus({
+          contractState: c.state,
+          contractTotalCents: c.totalPriceCents,
+          paidCents,
+          commissionCents: c.commissionCents ?? 0,
+          earnedAtPercent: commissionEarnedAtPercent,
+          ...(c.commissionPaidOutAt !== undefined
+            ? { paidOutAt: c.commissionPaidOutAt }
+            : {}),
+        });
+        if (status.state === "due" || status.state === "paid") {
+          facts.commissionDueCents += status.commissionCents;
+        } else if (status.state === "not_due") {
+          facts.commissionNotDueCents += status.commissionCents;
+        }
+      }
+    }
+
+    for (const [agentId, s] of span) {
+      const facts = byAgent.get(agentId);
+      if (facts === undefined) continue;
+      const months = Math.round((s.last - s.first) / (30 * 24 * 3600 * 1000));
+      facts.activeMonths = Math.max(1, months + 1);
+    }
+
+    const agentFacts = [...byAgent.values()].sort(
+      (a, b) => b.commissionCents - a.commissionCents,
+    );
+
+    // --- phases ------------------------------------------------------
+    const lots = await ctx.db.query("lots").collect();
+    const phases = (await ctx.db.query("phases").collect()).filter(
+      (p) => !p.isRetired,
+    );
+
+    // Which phase a lot belongs to, by section name. A lot in no phase
+    // is left out rather than assigned to one — guessing would make a
+    // phase look busier than it is.
+    const phaseOfSection = new Map<string, string>();
+    for (const p of phases) {
+      for (const name of p.sectionNames ?? []) {
+        phaseOfSection.set(name, p._id);
+      }
+    }
+
+    const soldInWindowByPhase = new Map<string, number>();
+    const lotPhase = new Map<string, string>();
+    for (const lot of lots) {
+      const phaseId = phaseOfSection.get(lot.section);
+      if (phaseId !== undefined) lotPhase.set(lot._id, phaseId);
+    }
+    for (const c of contracts) {
+      if (c.createdAt < windowStart || c.createdAt >= windowEnd) continue;
+      if (!CONSUMING_STATES.has(c.state)) continue;
+      const phaseId = lotPhase.get(c.lotId);
+      if (phaseId === undefined) continue;
+      soldInWindowByPhase.set(
+        phaseId,
+        (soldInWindowByPhase.get(phaseId) ?? 0) + 1,
+      );
+    }
+
+    const phaseFacts: PhaseFacts[] = phases
+      .sort((a, b) => a.number - b.number)
+      .map((p) => {
+        const names = new Set(p.sectionNames ?? []);
+        const mine = lots.filter(
+          (l) => !l.isRetired && names.has(l.section),
+        );
+        const available = mine.filter((l) => l.status === "available").length;
+        const priceTotal = mine.reduce((t, l) => t + l.basePriceCents, 0);
+        return {
+          phaseId: p._id,
+          number: p.number,
+          name: p.name,
+          stage: p.stage,
+          totalLots: mine.length,
+          availableLots: available,
+          soldLots: Math.max(0, mine.length - available),
+          soldInWindow: soldInWindowByPhase.get(p._id) ?? 0,
+          windowMonths: ANALYTICS_WINDOW_MONTHS,
+          averagePriceCents:
+            mine.length > 0 ? Math.round(priceTotal / mine.length) : 0,
+        };
+      });
+
+    return {
+      agents: analyseAgents(agentFacts),
+      phases: analysePhases(phaseFacts),
+      agentFacts,
+      phaseFacts,
+      windowMonths: ANALYTICS_WINDOW_MONTHS,
+      generatedAtMs: now,
+    };
+  },
+});
+
+/**
+ * What has been collected against a contract.
+ *
+ * Mirrors `convex/salesAgents.ts` — instalment rows where they exist,
+ * and the whole price for a full-payment contract, which has none by
+ * construction.
+ */
+async function sumInstallmentsPaid(
+  ctx: QueryCtx,
+  contract: { _id: ContractId; state: string; totalPriceCents: number },
+): Promise<number> {
+  const installments = await ctx.db
+    .query("installments")
+    .withIndex("by_contract", (q) => q.eq("contractId", contract._id))
+    .collect();
+  if (installments.length > 0) {
+    return installments.reduce((t, i) => t + i.paidCents, 0);
+  }
+  return contract.state === "paid_in_full" ? contract.totalPriceCents : 0;
 }

@@ -22,6 +22,9 @@ import Link from "next/link";
 import { useQuery } from "convex/react";
 import { makeFunctionReference } from "convex/server";
 
+import { formatPeso } from "@/lib/money";
+import { InsightPanel, type Insight } from "@/components/Analytics";
+
 // --- server surface ---------------------------------------------------
 
 interface MonthPoint {
@@ -95,13 +98,70 @@ const analyticsRef = makeFunctionReference<
   Analytics
 >("analytics:getInventoryAnalytics");
 
+interface AgentFacts {
+  agentId: string;
+  name: string;
+  isSystem: boolean;
+  salesCount: number;
+  soldValueCents: number;
+  commissionCents: number;
+  commissionDueCents: number;
+  commissionNotDueCents: number;
+  activeMonths: number;
+}
+
+interface PhaseFacts {
+  phaseId: string;
+  number: number;
+  name: string;
+  stage: string;
+  totalLots: number;
+  availableLots: number;
+  soldLots: number;
+  soldInWindow: number;
+  windowMonths: number;
+  averagePriceCents: number;
+}
+
+interface AnalysisResult {
+  agents: Insight[];
+  phases: Insight[];
+  agentFacts: AgentFacts[];
+  phaseFacts: PhaseFacts[];
+  windowMonths: number;
+  generatedAtMs: number;
+}
+
+/**
+ * The caller's own roles — a `requireAuth` self-read every signed-in
+ * user may run, so the page can decide what to ask for before asking.
+ */
+const rolesRef = makeFunctionReference<
+  "query",
+  Record<string, never>,
+  { userId: string; roles: string[]; isActive: boolean }
+>("users:getCurrentUserRoles");
+
+const analysisRef = makeFunctionReference<
+  "query",
+  Record<string, never>,
+  AnalysisResult
+>("analytics:getAnalysis");
+
 // --- page -------------------------------------------------------------
 
 export default function AnalyticsPage(): ReactElement {
-  // No role gate here: `/analytics` is in `isOfficeRoute`, so a field
-  // worker never reaches this component. See the note in
-  // `src/middleware.ts` — the edge decides, not the render.
+  // No role gate on the inventory query: `/analytics` is in
+  // `isOfficeRoute`, so a field worker never reaches this component.
   const data = useQuery(analyticsRef, {});
+
+  // The analysis IS admin-only — it names individual agents beside what
+  // they earn. Office staff reach this page, so it is gated with
+  // `"skip"`: a rejected `useQuery` throws during render rather than
+  // resolving to `undefined`, and would take the whole page down.
+  const me = useQuery(rolesRef, {});
+  const isAdmin = (me?.roles ?? []).includes("admin");
+  const analysis = useQuery(analysisRef, isAdmin ? {} : "skip");
 
   if (data === undefined) {
     return (
@@ -132,6 +192,26 @@ export default function AnalyticsPage(): ReactElement {
       <PlanChecks checks={data.phaseChecks} />
       <Series data={data} />
       <Gardens sections={data.sections} />
+
+      {isAdmin && analysis !== undefined && (
+        <>
+          <hr className="border-slate-200" />
+          <InsightPanel
+            title="Agents"
+            subtitle={`Who is earning most and least, and what separates them. Read over the last ${analysis.windowMonths} months.`}
+            insights={analysis.agents}
+          />
+          <AgentTable facts={analysis.agentFacts} />
+
+          <hr className="border-slate-200" />
+          <InsightPanel
+            title="Phases"
+            subtitle="Which parcels are being bought and which are sitting."
+            insights={analysis.phases}
+          />
+          <PhaseTable facts={analysis.phaseFacts} />
+        </>
+      )}
 
       <p className="text-xs text-slate-500">
         Counts exclude retired lots ({data.retiredLots}), voided and
@@ -424,5 +504,125 @@ function Gardens({ sections }: { sections: SectionRow[] }): ReactElement {
         office is showing families first.
       </p>
     </section>
+  );
+}
+
+/**
+ * The numbers the agent findings were computed from.
+ *
+ * Shown beside the findings rather than instead of them. A reader who
+ * disagrees with a conclusion should be able to see what produced it
+ * without leaving the page — that is the difference between analysis
+ * and assertion.
+ *
+ * The park's own row is included here, greyed, because it is a real and
+ * usually large share of sales. It is excluded from the FINDINGS, where
+ * it would be the biggest seller and the worst earner at once.
+ */
+function AgentTable({ facts }: { facts: AgentFacts[] }): ReactElement {
+  if (facts.length === 0) return <></>;
+
+  return (
+    <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+      <table className="w-full min-w-[640px] text-sm">
+        <thead>
+          <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wider text-slate-500">
+            <th className="px-4 py-2 font-medium">Agent</th>
+            <th className="px-4 py-2 text-right font-medium">Sales</th>
+            <th className="px-4 py-2 text-right font-medium">Value sold</th>
+            <th className="px-4 py-2 text-right font-medium">Commission</th>
+            <th className="px-4 py-2 text-right font-medium">Payable</th>
+            <th className="px-4 py-2 text-right font-medium">Waiting</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {facts.map((a) => (
+            <tr
+              key={a.agentId}
+              data-testid="analytics-agent-row"
+              className={a.isSystem ? "text-slate-500" : "text-slate-800"}
+            >
+              <td className="px-4 py-2.5">
+                {a.name}
+                {a.isSystem && (
+                  <span className="ml-2 text-xs text-slate-400">
+                    the park &mdash; not ranked
+                  </span>
+                )}
+              </td>
+              <td className="px-4 py-2.5 text-right tabular-nums">
+                {a.salesCount}
+              </td>
+              <td className="px-4 py-2.5 text-right tabular-nums">
+                {formatPeso(a.soldValueCents)}
+              </td>
+              <td className="px-4 py-2.5 text-right tabular-nums">
+                {formatPeso(a.commissionCents)}
+              </td>
+              <td className="px-4 py-2.5 text-right tabular-nums">
+                {formatPeso(a.commissionDueCents)}
+              </td>
+              <td className="px-4 py-2.5 text-right tabular-nums">
+                {formatPeso(a.commissionNotDueCents)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** The numbers the phase findings were computed from. */
+function PhaseTable({ facts }: { facts: PhaseFacts[] }): ReactElement {
+  if (facts.length === 0) return <></>;
+
+  return (
+    <div className="overflow-x-auto rounded-md border border-slate-200 bg-white">
+      <table className="w-full min-w-[640px] text-sm">
+        <thead>
+          <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wider text-slate-500">
+            <th className="px-4 py-2 font-medium">Phase</th>
+            <th className="px-4 py-2 font-medium">Stage</th>
+            <th className="px-4 py-2 text-right font-medium">Lots</th>
+            <th className="px-4 py-2 text-right font-medium">Taken</th>
+            <th className="px-4 py-2 text-right font-medium">
+              Sold in window
+            </th>
+            <th className="px-4 py-2 text-right font-medium">Avg price</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {facts.map((p) => (
+            <tr
+              key={p.phaseId}
+              data-testid="analytics-phase-row"
+              className="text-slate-800"
+            >
+              <td className="px-4 py-2.5">{p.name}</td>
+              <td className="px-4 py-2.5 font-mono text-[11px] uppercase tracking-[0.14em] text-slate-500">
+                {p.stage}
+              </td>
+              <td className="px-4 py-2.5 text-right tabular-nums">
+                {p.totalLots}
+              </td>
+              <td className="px-4 py-2.5 text-right tabular-nums">
+                {p.totalLots > 0
+                  ? `${Math.round((p.soldLots / p.totalLots) * 100)}%`
+                  : "—"}
+              </td>
+              <td className="px-4 py-2.5 text-right tabular-nums">
+                {p.soldInWindow}
+              </td>
+              <td className="px-4 py-2.5 text-right tabular-nums">
+                {p.averagePriceCents > 0
+                  ? formatPeso(p.averagePriceCents)
+                  : "—"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
