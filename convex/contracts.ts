@@ -78,6 +78,11 @@ import schema from "./schema";
 import { requireRole, type MutationCtx, type QueryCtx } from "./lib/auth";
 import { emitAudit } from "./lib/audit";
 import { ErrorCode, throwError } from "./lib/errors";
+import {
+  computeCommissionCents,
+  resolveCommissionPercent,
+} from "./lib/commission";
+import { readAppSettings } from "./reports";
 import { generateInstallmentSchedule } from "./lib/installmentSchedule";
 import {
   computePerpetualCareForSale,
@@ -184,6 +189,13 @@ export interface RecordFullPaymentSaleArgs {
    */
   paymentPlanId?: string;
   promoId?: string;
+  /**
+   * Who sold it, and a rate agreed at the desk if it differs from the
+   * agent's own or the park's default. The commission AMOUNT is never
+   * accepted from the client — it is computed here and frozen.
+   */
+  salesAgentId?: string;
+  commissionPercent?: number;
 }
 
 /**
@@ -496,6 +508,64 @@ async function applyOffer(
   return out;
 }
 
+/**
+ * Who gets the commission on this sale, and how much.
+ *
+ * Returns `null` when no agent was named — most sales at a small park
+ * are walk-ins, and a commission of zero attached to nobody is noise in
+ * every report that reads it.
+ *
+ * The RATE is resolved server-side from the desk figure, the agent's
+ * own rate, then the park default, in that order. The client sends at
+ * most a percentage; it never sends an amount. A commission is money
+ * leaving the park, and the arithmetic for it belongs here.
+ */
+async function resolveCommission(
+  ctx: MutationCtx,
+  args: {
+    salesAgentId?: DataModel["salesAgents"]["document"]["_id"];
+    explicitPercent?: number;
+    contractTotalCents: number;
+  },
+): Promise<{
+  salesAgentId: DataModel["salesAgents"]["document"]["_id"];
+  percent: number;
+  cents: number;
+} | null> {
+  if (args.salesAgentId === undefined) return null;
+
+  const agent = await ctx.db.get(args.salesAgentId);
+  if (agent === null) {
+    throwError(ErrorCode.NOT_FOUND, "That sales agent no longer exists.", {
+      salesAgentId: args.salesAgentId,
+    });
+  }
+  if (agent.isRetired) {
+    throwError(
+      ErrorCode.VALIDATION,
+      `${agent.fullName} has been retired and cannot be credited with new sales.`,
+      { salesAgentId: args.salesAgentId },
+    );
+  }
+
+  const settings = await readAppSettings(ctx);
+  const percent = resolveCommissionPercent({
+    ...(args.explicitPercent !== undefined
+      ? { explicitPercent: args.explicitPercent }
+      : {}),
+    ...(agent.commissionPercent !== undefined
+      ? { agentPercent: agent.commissionPercent }
+      : {}),
+    defaultPercent: settings.defaultCommissionPercent,
+  });
+
+  return {
+    salesAgentId: args.salesAgentId,
+    percent,
+    cents: computeCommissionCents(args.contractTotalCents, percent),
+  };
+}
+
 export const recordFullPaymentSale = mutationGeneric({
   args: {
     lotId: v.id("lots"),
@@ -517,6 +587,10 @@ export const recordFullPaymentSale = mutationGeneric({
     // existed has neither.
     paymentPlanId: v.optional(v.id("paymentPlans")),
     promoId: v.optional(v.id("promos")),
+    // Who sold it. The RATE is resolved server-side and frozen onto the
+    // contract; the client never sends a commission amount.
+    salesAgentId: v.optional(v.id("salesAgents")),
+    commissionPercent: v.optional(v.number()),
     // Story 2.9 (FR15 brand-tier extension) — optional estate-mode FK.
     familyEstateId: v.optional(v.id("familyEstates")),
   },
@@ -781,6 +855,26 @@ export const recordFullPaymentSale = mutationGeneric({
     if (offer.promoCode !== undefined) {
       contractRow.promoCode = offer.promoCode;
     }
+    // Commission, frozen at the sale. Deriving it later from the
+    // agent's current rate would rewrite what an agent was promised
+    // every time the park adjusted its rates.
+    const commission = await resolveCommission(ctx, {
+      ...(args.salesAgentId !== undefined
+        ? {
+            salesAgentId:
+              args.salesAgentId as unknown as DataModel["salesAgents"]["document"]["_id"],
+          }
+        : {}),
+      ...(args.commissionPercent !== undefined
+        ? { explicitPercent: args.commissionPercent }
+        : {}),
+      contractTotalCents: contractRow.totalPriceCents,
+    });
+    if (commission !== null) {
+      contractRow.salesAgentId = commission.salesAgentId;
+      contractRow.commissionPercent = commission.percent;
+      contractRow.commissionCents = commission.cents;
+    }
     const contractId = await ctx.db.insert("contracts", contractRow);
 
     // Step 5: Transition the lot from `available` to `sold`. The helper
@@ -988,6 +1082,13 @@ export interface RecordInstallmentSaleArgs {
    */
   paymentPlanId?: string;
   promoId?: string;
+  /**
+   * Who sold it, and a rate agreed at the desk if it differs from the
+   * agent's own or the park's default. The commission AMOUNT is never
+   * accepted from the client — it is computed here and frozen.
+   */
+  salesAgentId?: string;
+  commissionPercent?: number;
 }
 
 /**
@@ -1138,6 +1239,10 @@ export const recordInstallmentSale = mutationGeneric({
     // existed has neither.
     paymentPlanId: v.optional(v.id("paymentPlans")),
     promoId: v.optional(v.id("promos")),
+    // Who sold it. The RATE is resolved server-side and frozen onto the
+    // contract; the client never sends a commission amount.
+    salesAgentId: v.optional(v.id("salesAgents")),
+    commissionPercent: v.optional(v.number()),
     // Story 2.9 (FR15 brand-tier extension) — optional estate-mode FK.
     familyEstateId: v.optional(v.id("familyEstates")),
   },
@@ -1690,6 +1795,26 @@ export const recordInstallmentSale = mutationGeneric({
     if (offer.promoId !== undefined) contractRow.promoId = offer.promoId;
     if (offer.promoCode !== undefined) {
       contractRow.promoCode = offer.promoCode;
+    }
+    // Commission, frozen at the sale. Deriving it later from the
+    // agent's current rate would rewrite what an agent was promised
+    // every time the park adjusted its rates.
+    const commission = await resolveCommission(ctx, {
+      ...(args.salesAgentId !== undefined
+        ? {
+            salesAgentId:
+              args.salesAgentId as unknown as DataModel["salesAgents"]["document"]["_id"],
+          }
+        : {}),
+      ...(args.commissionPercent !== undefined
+        ? { explicitPercent: args.commissionPercent }
+        : {}),
+      contractTotalCents: contractRow.totalPriceCents,
+    });
+    if (commission !== null) {
+      contractRow.salesAgentId = commission.salesAgentId;
+      contractRow.commissionPercent = commission.percent;
+      contractRow.commissionCents = commission.cents;
     }
     const contractId = await ctx.db.insert("contracts", contractRow);
 

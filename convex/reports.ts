@@ -68,6 +68,10 @@ import schema from "./schema";
 import { requireRole, type MutationCtx, type QueryCtx } from "./lib/auth";
 import { normaliseThreshold } from "./lib/intermentEligibility";
 import { DEFAULT_MAX_DISCOUNT_PERCENT } from "./lib/pricing";
+import {
+  normaliseCommissionPercent,
+  normaliseEarnedAtPercent,
+} from "./lib/commission";
 import { emitAudit } from "./lib/audit";
 import { add } from "./lib/money";
 
@@ -467,6 +471,8 @@ export async function readAppSettings(ctx: QueryCtx): Promise<{
   salesAgentTrackingEnabled: boolean;
   intermentPaymentThresholdPercent: number;
   maxDiscountPercent: number;
+  defaultCommissionPercent: number;
+  commissionEarnedAtPercent: number;
 }> {
   const row = await ctx.db
     .query("appSettings")
@@ -487,6 +493,17 @@ export async function readAppSettings(ctx: QueryCtx): Promise<{
       row.maxDiscountPercent <= 100
         ? row.maxDiscountPercent
         : DEFAULT_MAX_DISCOUNT_PERCENT,
+    // No default rate. A park that has configured none owes nothing
+    // until somebody decides what the rate is — safer than a number
+    // appearing out of the code and quietly attaching to sales.
+    defaultCommissionPercent: normaliseCommissionPercent(
+      row?.defaultCommissionPercent,
+    ),
+    // A default of 20% DOES apply, because the alternative default is
+    // "pay at signing" — the failure the threshold exists to prevent.
+    commissionEarnedAtPercent: normaliseEarnedAtPercent(
+      row?.commissionEarnedAtPercent,
+    ),
   };
 }
 

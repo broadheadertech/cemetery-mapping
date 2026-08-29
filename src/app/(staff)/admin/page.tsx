@@ -48,6 +48,12 @@ const GROUPS: AdminGroup[] = [
         description: "Runtime toggles, e.g. sales-agent tracking.",
       },
       {
+        href: "/admin/settings/sales-agents",
+        title: "Sales agents",
+        description:
+          "Who sells for the park, their commission rates, and how far a family must have paid before a commission is owed.",
+      },
+      {
         href: "/admin/settings/certificate",
         title: "Certificate of ownership",
         description:

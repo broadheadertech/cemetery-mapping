@@ -140,6 +140,7 @@ export default defineSchema({
       // Installing or re-placing the certificate blank changes every
       // certificate the park issues from then on.
       v.literal("certificate_template"),
+      v.literal("sales_agent"),
     ),
     entityId: v.string(),
     before: v.optional(v.any()),
@@ -1180,6 +1181,25 @@ export default defineSchema({
     paymentPlanId: v.optional(v.id("paymentPlans")),
     promoId: v.optional(v.id("promos")),
     promoCode: v.optional(v.string()),
+    /**
+     * Who sold it, and on what terms.
+     *
+     * `commissionPercent` and `commissionCents` are FROZEN at the sale.
+     * Deriving them at read time from the agent's current rate would
+     * silently rewrite what an agent was promised last year every time
+     * the park adjusts its rates — and an agent's income is not a
+     * figure that should move on its own.
+     *
+     * `commissionPaidOutAt` marks it settled. Whether it is DUE is
+     * derived from collections against the contract; see
+     * `convex/lib/commission.ts`.
+     */
+    salesAgentId: v.optional(v.id("salesAgents")),
+    commissionPercent: v.optional(v.number()),
+    commissionCents: v.optional(v.number()),
+    commissionPaidOutAt: v.optional(v.number()),
+    commissionPaidOutByUserId: v.optional(v.id("users")),
+    commissionPayoutNote: v.optional(v.string()),
     // Story 3.8 (FR25) — perpetual care fee addon.
     //
     // Phase 1 scope per the §10 Q7-pending interpretation: a single
@@ -2926,7 +2946,61 @@ export default defineSchema({
      * they did not intend. See `convex/lib/pricing.ts`.
      */
     maxDiscountPercent: v.optional(v.number()),
+    /**
+     * The park's standard commission rate. No default — a park that has
+     * set none owes nothing until somebody decides what the rate is,
+     * which is safer than a number appearing out of the code.
+     */
+    defaultCommissionPercent: v.optional(v.number()),
+    /**
+     * Share of a contract that must be COLLECTED before a commission is
+     * payable. 20 by default.
+     *
+     * This is the risk lever, not the price lever. Paying at signing
+     * means paying commission on money that may never arrive: an
+     * instalment contract that defaults in month three has cost the
+     * park a commission and left it holding a lot to sell again. Zero
+     * means pay at signing, which is a legitimate choice a park should
+     * have to make rather than fall into.
+     */
+    commissionEarnedAtPercent: v.optional(v.number()),
   }).index("by_key", ["key"]),
+
+  /**
+   * Sales agents — records, not logins.
+   *
+   * An agent here is a name a sale is credited to, so the park can
+   * answer "who sold this" and "what do we owe". They have no account
+   * and see nothing; if that changes, this table gains a `userId` and
+   * the role list gains a member, and neither is assumed now.
+   *
+   * Field notes:
+   *   - `commissionPercent` — this agent's own rate, when it differs
+   *     from the park's. Absent means the park default applies.
+   *   - `fullNameLowercased` — denormalised for the same reason
+   *     `customers` carries one: Convex indexes stored fields only, and
+   *     the desk needs to find an agent by typing part of a name.
+   *   - `isRetired` — soft delete, always. Contracts reference agents,
+   *     and a contract has to go on saying who sold it long after the
+   *     agent left.
+   */
+  salesAgents: defineTable({
+    fullName: v.string(),
+    fullNameLowercased: v.string(),
+    code: v.optional(v.string()),
+    phone: v.optional(v.string()),
+    email: v.optional(v.string()),
+    commissionPercent: v.optional(v.number()),
+    notes: v.optional(v.string()),
+    isRetired: v.boolean(),
+    createdAt: v.number(),
+    createdByUserId: v.id("users"),
+    updatedAt: v.number(),
+    updatedByUserId: v.optional(v.id("users")),
+  })
+    .index("by_fullName_lowercased", ["fullNameLowercased"])
+    .index("by_code", ["code"])
+    .index("by_isRetired", ["isRetired"]),
 
   /**
    * Payment plans — the ways a lot may be bought.

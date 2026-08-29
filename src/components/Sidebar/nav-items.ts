@@ -257,6 +257,21 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
         requiredRoles: ["admin"],
       },
       {
+        // Who sells for the park. Admin-only: a staffer who could mint
+        // an agent and set its rate could route commission anywhere.
+        href: "/admin/settings/sales-agents",
+        label: "Sales agents",
+        icon: Users,
+        requiredRoles: ["admin"],
+      },
+      {
+        // What the park owes them. A payroll view, so admin-only.
+        href: "/admin/commissions",
+        label: "Commissions",
+        icon: Wallet,
+        requiredRoles: ["admin"],
+      },
+      {
         href: "/admin/expense-approvals",
         label: "Expense approvals",
         icon: ClipboardCheck,

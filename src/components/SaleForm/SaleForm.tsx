@@ -93,6 +93,9 @@ type RecordFullPaymentSaleArgs = {
   // price from a plan; it re-validates the centavo amounts above.
   paymentPlanId?: string;
   promoId?: string;
+  // Who to credit. An id only; the commission amount is never sent from
+  // the client — it is money leaving the park.
+  salesAgentId?: string;
 };
 
 interface PreviewPerpetualCareResult {
@@ -103,6 +106,7 @@ interface PreviewPerpetualCareResult {
 }
 
 import { PlanPicker, type QuoteOption } from "./PlanPicker";
+import { AgentPicker } from "./AgentPicker";
 
 const previewPerpetualCareRef = makeFunctionReference<
   "query",
@@ -168,6 +172,12 @@ export function SaleForm({ userRoles = [], initialLotId }: SaleFormProps) {
     planId: string;
     promoId?: string;
   } | null>(null);
+  /**
+   * Who to credit the sale to. Empty for a walk-in, which is most of
+   * them. The RATE is resolved and frozen server-side; the form sends
+   * an id and never an amount.
+   */
+  const [salesAgentId, setSalesAgentId] = useState("");
   const [previewOpen, setPreviewOpen] = useState(false);
   const [isCommitting, setIsCommitting] = useState(false);
   const [commitError, setCommitError] = useState<string | null>(null);
@@ -405,6 +415,11 @@ export function SaleForm({ userRoles = [], initialLotId }: SaleFormProps) {
           args.promoId = appliedOffer.promoId;
         }
       }
+      // Who sold it. An id only — the server resolves the rate from the
+      // agent and the park's policy, and freezes both onto the contract.
+      if (salesAgentId.length > 0) {
+        args.salesAgentId = salesAgentId;
+      }
       // Story 3.8 (FR25) — perpetual care is policy-driven; the server
       // derives the fee from `cemeterySettings.perpetualCarePolicy` at
       // sale-time using the lot's `lotType`. The client no longer
@@ -626,6 +641,15 @@ export function SaleForm({ userRoles = [], initialLotId }: SaleFormProps) {
               />
             </div>
           )}
+
+          {/* Who to credit. Sits beside the price because that is what
+            * the commission is a share of, and the operator should see
+            * what the park is about to owe before committing. */}
+          <AgentPicker
+            value={salesAgentId}
+            onChange={setSalesAgentId}
+            totalCents={totalWithAddons}
+          />
 
           <div className="space-y-1">
             <label
