@@ -87,6 +87,8 @@ const isStaffRoute = createRouteMatcher([
   // here: decide at the edge, not in the render.
   "/analytics",
   "/analytics/(.*)",
+  "/certificates",
+  "/certificates/(.*)",
   "/ceremonies",
   "/ceremonies/(.*)",
   "/enquiries",
@@ -164,6 +166,8 @@ const isOfficeRoute = createRouteMatcher([
   "/phase-planning/(.*)",
   "/analytics",
   "/analytics/(.*)",
+  "/certificates",
+  "/certificates/(.*)",
   "/interments",
   "/interments/quick",
 ]);

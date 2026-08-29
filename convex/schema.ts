@@ -137,6 +137,9 @@ export default defineSchema({
       // long after the plan is retired.
       v.literal("payment_plan"),
       v.literal("promo"),
+      // Installing or re-placing the certificate blank changes every
+      // certificate the park issues from then on.
+      v.literal("certificate_template"),
     ),
     entityId: v.string(),
     before: v.optional(v.any()),
@@ -2959,6 +2962,130 @@ export default defineSchema({
    *     form but stays readable, because contracts reference it and a
    *     contract must still be able to say what it was sold under.
    */
+  /**
+   * The blank certificate the park had designed, plus where each detail
+   * goes on it.
+   *
+   * The cemetery uploads its OWN document — letterhead, border, seal,
+   * signature blocks, and whatever wording its lawyer approved. Nothing
+   * here composes a certificate from scratch; guessing the legal text of
+   * a document a family frames and may one day take to a court is not
+   * this system's business.
+   *
+   * Field notes:
+   *   - `storageId` — the blank, as uploaded. A PDF stays vector; a PNG
+   *     or JPEG is drawn as a full-page image.
+   *   - `pageWidthPt` / `pageHeightPt` — the page the placements were
+   *     made against, read from the file at upload. Kept so a later
+   *     re-upload at a different size can be detected rather than
+   *     silently shifting every field.
+   *   - `fields[].xFrac` / `yFrac` — FRACTIONS of the page, 0–1, not
+   *     points. The admin places fields on a preview of whatever size
+   *     the browser rendered; fractions survive that, survive a
+   *     re-upload at a different DPI, and survive A4-vs-Letter.
+   *   - `yFrac` is measured from the TOP, because that is how a person
+   *     looking at a page thinks. PDF's own origin is bottom-left; the
+   *     flip happens in one place, in `convex/lib/certificate.ts`.
+   *   - `isActive` — one template is in use at a time. Superseded ones
+   *     are kept: a certificate issued last year was issued against the
+   *     template of last year, and the record should be able to say so.
+   */
+  certificateTemplates: defineTable({
+    name: v.string(),
+    storageId: v.id("_storage"),
+    mimeType: v.string(),
+    fileName: v.optional(v.string()),
+    pageWidthPt: v.number(),
+    pageHeightPt: v.number(),
+    fields: v.array(
+      v.object({
+        key: v.string(),
+        xFrac: v.number(),
+        yFrac: v.number(),
+        fontSize: v.number(),
+        align: v.union(
+          v.literal("left"),
+          v.literal("center"),
+          v.literal("right"),
+        ),
+        maxWidthFrac: v.optional(v.number()),
+      }),
+    ),
+    isActive: v.boolean(),
+    createdAt: v.number(),
+    createdByUserId: v.id("users"),
+    updatedAt: v.number(),
+    updatedByUserId: v.optional(v.id("users")),
+  })
+    .index("by_isActive", ["isActive"])
+    .index("by_createdAt", ["createdAt"]),
+
+  /**
+   * The certificate numbering sequence.
+   *
+   * A single row. Exists because the serial has to be PRINTED on the
+   * document, which means it must be assigned before the PDF is
+   * rendered — and counting existing rows at that moment would hand the
+   * same number to two families issuing at once. A counter row is
+   * read-modify-written inside one mutation, and Convex's transaction
+   * layer makes that safe.
+   *
+   * Deliberately NOT `receiptCounter`. That sequence is BIR-registered,
+   * audited, and monotonic for reasons that have nothing to do with
+   * certificates; consuming an official serial for a document the BIR
+   * never asked about would be a finding. A gap in THIS sequence — a
+   * render that failed after the number was taken — is a curiosity.
+   */
+  certificateCounter: defineTable({
+    key: v.literal("singleton"),
+    lastSerial: v.number(),
+  }).index("by_key", ["key"]),
+
+  /**
+   * A certificate of ownership, issued against a fully-paid contract.
+   *
+   * Two ways one exists. Usually the system fills the uploaded template
+   * and stores the result. Sometimes the office uploads a finished
+   * document instead — a reissue, a court-ordered wording, a hand-signed
+   * original a family wants scanned in. Both are certificates; `source`
+   * says which.
+   *
+   * Superseding, never overwriting. A replacement inserts a new row and
+   * marks the old one superseded. A certificate is a document somebody
+   * may hold a printed copy of, and "what did we give them in March" has
+   * to stay answerable.
+   *
+   * Field notes:
+   *   - `isSuperseded` — indexed with `contractId` so the current
+   *     certificate is one lookup, not a scan-and-sort.
+   *   - `templateId` — which blank it was filled from. Absent on an
+   *     uploaded one, because there was no template involved.
+   *   - `serial` — a human reference to quote on the phone. Distinct
+   *     from BIR receipt serials, which are a regulated sequence and
+   *     must never be borrowed for anything else.
+   */
+  certificates: defineTable({
+    contractId: v.id("contracts"),
+    customerId: v.id("customers"),
+    lotId: v.id("lots"),
+    serial: v.string(),
+    source: v.union(v.literal("generated"), v.literal("uploaded")),
+    storageId: v.id("_storage"),
+    mimeType: v.string(),
+    templateId: v.optional(v.id("certificateTemplates")),
+    issuedAt: v.number(),
+    issuedByUserId: v.id("users"),
+    note: v.optional(v.string()),
+    isSuperseded: v.boolean(),
+    supersededAt: v.optional(v.number()),
+    supersededByUserId: v.optional(v.id("users")),
+    supersededReason: v.optional(v.string()),
+  })
+    .index("by_contract_superseded", ["contractId", "isSuperseded"])
+    .index("by_contract", ["contractId"])
+    .index("by_customer", ["customerId"])
+    .index("by_serial", ["serial"]),
+
   paymentPlans: defineTable({
     name: v.string(),
     description: v.optional(v.string()),

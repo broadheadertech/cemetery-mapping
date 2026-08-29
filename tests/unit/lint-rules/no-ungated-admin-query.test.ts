@@ -58,6 +58,7 @@ const EDGE_GATED_PREFIXES = [
   "/sales/",
   "/phase-planning/",
   "/analytics/",
+  "/certificates/",
   // Customer portal — middleware sends every non-customer to /dashboard.
   "/(customer)/",
 ];

@@ -128,7 +128,8 @@ export type AuditEntityType =
   | "plaque_draft"
   | "enquiry"
   | "payment_plan"
-  | "promo";
+  | "promo"
+  | "certificate_template";
 
 /**
  * PII field names that `redactPii` recognizes. Extend the set as new

@@ -194,6 +194,15 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
         requiredRoles: ["admin", "office_staff"],
       },
       {
+        // Families who have finished paying and have no certificate yet.
+        // A work list, not a dashboard tile — each row is a person owed
+        // a document.
+        href: "/certificates",
+        label: "Certificates",
+        icon: FileText,
+        requiredRoles: ["admin", "office_staff"],
+      },
+      {
         // Story 7.5 — combined consecration + interment calendar.
         href: "/ceremonies/calendar",
         label: "Ceremonies",
@@ -236,6 +245,15 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
         href: "/admin/settings/payment-plans",
         label: "Payment plans",
         icon: Wallet,
+        requiredRoles: ["admin"],
+      },
+      {
+        // The park's own certificate blank and its field placements.
+        // Admin-only: this file becomes every certificate the park
+        // issues, so replacing it is a decision, not a task.
+        href: "/admin/settings/certificate",
+        label: "Certificate",
+        icon: FileText,
         requiredRoles: ["admin"],
       },
       {

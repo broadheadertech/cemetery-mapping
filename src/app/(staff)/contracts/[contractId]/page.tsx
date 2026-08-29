@@ -30,6 +30,7 @@ import { FlagContractDialog } from "@/components/FlagContractDialog";
 import { MarkInDefaultDialog } from "@/components/MarkInDefaultDialog";
 import { ReclaimLotDialog } from "@/components/ReclaimLotDialog";
 import { StatusPill } from "@/components/ui/StatusPill";
+import { CertificatePanel } from "@/components/CertificatePanel";
 
 type ContractState =
   | "active"
@@ -1057,6 +1058,12 @@ export default function ContractDetailPage() {
         lotCode={detail.lotCode}
         customerName={detail.customerFullName}
       />
+
+      {/* The certificate of ownership. Shown on every contract, not
+       *   only the fully-paid ones: on an open contract the panel says
+       *   WHY there is no certificate yet, which is a sentence the
+       *   office can read to a family who asked for one. */}
+      <CertificatePanel contractId={contractId} />
 
       {/* TODO Story 3.6: replace this stub with the full contract
        *   timeline (payment list, transition controls, void / cancel
