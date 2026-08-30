@@ -11,6 +11,22 @@ import {
 import dynamic from "next/dynamic";
 import { DEFAULT_CEMETERY_BBOX, type Bbox } from "@/lib/geometry";
 import { useLotsInViewport } from "@/hooks/useLotsInViewport";
+import { useQuery } from "convex/react";
+import { makeFunctionReference } from "convex/server";
+import type { SectionOutline } from "./LeafletRenderer";
+
+/**
+ * The traced garden outlines.
+ *
+ * Read once for the whole map rather than per viewport: there are a
+ * handful of gardens, they change when an admin traces one, and
+ * re-reading them on every pan would be work for nothing.
+ */
+const listBoundariesRef = makeFunctionReference<
+  "query",
+  Record<string, never>,
+  SectionOutline[]
+>("sections:listSectionBoundaries");
 import type { LotStatus } from "@/types/lot-status";
 import { SvgRenderer } from "./SvgRenderer";
 
@@ -124,6 +140,7 @@ export function LotMap({
     bbox: effectiveBbox,
     statusFilters,
   });
+  const outlines = useQuery(listBoundariesRef, {});
 
   /*
    * Once Leaflet is up, it stays up.
@@ -209,6 +226,7 @@ export function LotMap({
           <LeafletRenderer
             bbox={effectiveBbox}
             lots={safeLots}
+            outlines={outlines ?? []}
             onLotClick={onLotClick}
             height={height}
             selectedLotId={selectedLotId}

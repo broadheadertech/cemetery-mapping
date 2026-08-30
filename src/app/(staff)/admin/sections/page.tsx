@@ -56,6 +56,8 @@ interface SectionRow {
   isRetired: boolean;
   createdAt: number;
   linkedLotCount: number;
+  /** The traced outline on the cemetery map, if there is one. */
+  boundary?: Array<{ lat: number; lng: number }>;
   /** How the 3D map arranges this garden. Null when nobody has set it. */
   gridColumns: number | null;
   gridRows: number | null;
@@ -271,13 +273,30 @@ export default function AdminSectionsPage() {
                         edited rarely and read alongside the garden it
                         belongs to. */}
                     {!s.isRetired && (
-                      <SectionLayoutControl
-                        sectionId={s._id}
-                        displayName={s.displayName}
-                        gridColumns={s.gridColumns}
-                        gridRows={s.gridRows}
-                        lotCount={s.linkedLotCount}
-                      />
+                      <>
+                        {/*
+                          The garden's edges on the real map, as distinct
+                          from its shape on the 3D one. Without an
+                          outline the cemetery map shows lots floating in
+                          an empty field.
+                        */}
+                        <a
+                          href={`/admin/sections/${s._id}/boundary`}
+                          data-testid="section-boundary-link"
+                          className="mt-2 inline-block text-xs font-medium text-slate-600 underline hover:text-slate-900"
+                        >
+                          {s.boundary === undefined
+                            ? "Map outline: not traced"
+                            : `Map outline: ${s.boundary.length} corners`}
+                        </a>
+                        <SectionLayoutControl
+                          sectionId={s._id}
+                          displayName={s.displayName}
+                          gridColumns={s.gridColumns}
+                          gridRows={s.gridRows}
+                          lotCount={s.linkedLotCount}
+                        />
+                      </>
                     )}
                   </td>
                   <td className="px-4 py-3 font-mono text-xs text-slate-600">

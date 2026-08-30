@@ -40,9 +40,25 @@ import type { LotForMap } from "@/hooks/useLotsInViewport";
  * geometry available yet); surveyed lots render as filled polygons.
  */
 
+/** One garden's traced outline, drawn beneath the lots. */
+export interface SectionOutline {
+  sectionId: string;
+  displayName: string;
+  tintHex: number | null;
+  boundary: Array<{ lat: number; lng: number }>;
+}
+
 export interface LeafletRendererProps {
   bbox: Bbox;
   lots: LotForMap[];
+  /**
+   * Garden outlines, if any have been traced.
+   *
+   * Without them the map is lots floating in an empty field: coloured
+   * squares with nothing to say where a garden begins, where it ends,
+   * or that they belong together at all.
+   */
+  outlines?: SectionOutline[];
   onLotClick: (lotId: string) => void;
   /** Optional aspect-driven max height in CSS units. Defaults to 600px. */
   height?: number;
@@ -121,6 +137,7 @@ export class LeafletLoadFailureError extends Error {
 export function LeafletRenderer({
   bbox,
   lots,
+  outlines,
   onLotClick,
   height = 600,
   selectedLotId,
@@ -136,6 +153,10 @@ export function LeafletRenderer({
   // keeps the public component free of a static `leaflet` type import.
   const mapRef = useRef<unknown>(null);
   const layerGroupRef = useRef<unknown>(null);
+  // Its own layer, UNDER the lots: a garden is the ground the lots sit
+  // on, and a filled polygon drawn over them would swallow their
+  // colours and their clicks.
+  const outlineLayerRef = useRef<unknown>(null);
   // `onBboxChange` is referenced inside the bootstrap `useEffect` which
   // intentionally runs once per mount. Mirror the callback through a
   // ref so the live moveend handler always reaches the latest closure
@@ -205,8 +226,11 @@ export function LeafletRenderer({
           );
         }
 
+        // Added first, so it paints beneath the lot layer.
+        const outlineLayer = L.layerGroup().addTo(map);
         const layerGroup = L.layerGroup().addTo(map);
         mapRef.current = map;
+        outlineLayerRef.current = outlineLayer;
         layerGroupRef.current = layerGroup;
 
         // Story 8.2 (HIGH-fix) AC3 — debounced `moveend` notifier.
@@ -280,6 +304,7 @@ export function LeafletRenderer({
       }
       mapRef.current = null;
       layerGroupRef.current = null;
+      outlineLayerRef.current = null;
     };
     // We intentionally rebuild the map only on first mount; bbox
     // changes after mount are handled by the lot-rendering effect
@@ -356,6 +381,62 @@ export function LeafletRenderer({
       cancelled = true;
     };
   }, [lots, selectedLotId, ready, onLotClick]);
+
+  /*
+   * The gardens themselves.
+   *
+   * A separate effect and a separate layer from the lots: outlines
+   * change when an admin traces one, which is rarely, while the lots
+   * redraw on every pan. Rebuilding one because the other moved would
+   * throw away and remake a polygon per garden on every viewport
+   * change.
+   */
+  useEffect(() => {
+    if (!ready) return;
+    const layer = outlineLayerRef.current as {
+      clearLayers: () => void;
+      addLayer: (l: unknown) => void;
+    } | null;
+    if (layer === null) return;
+
+    let cancelled = false;
+    (async () => {
+      const L = await import("leaflet");
+      if (cancelled) return;
+      layer.clearLayers();
+
+      for (const o of outlines ?? []) {
+        const colour =
+          o.tintHex === null
+            ? "#1D5C4D"
+            : `#${o.tintHex.toString(16).padStart(6, "0")}`;
+        const poly = L.polygon(
+          o.boundary.map((p) => [p.lat, p.lng] as [number, number]),
+          {
+            color: colour,
+            weight: 2,
+            opacity: 0.9,
+            fillColor: colour,
+            // Faint on purpose. The garden is context; the lots are the
+            // subject, and a solid fill would drown them.
+            fillOpacity: 0.08,
+            // Clicks belong to the lots on top of it.
+            interactive: false,
+          },
+        );
+        poly.bindTooltip(o.displayName, {
+          permanent: true,
+          direction: "center",
+          className: "lotmap-section-label",
+        });
+        layer.addLayer(poly);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [outlines, ready]);
 
   // Fly to a requested point (find-a-grave). Runs only after the map is
   // ready, so it never races the bootstrap's init view.

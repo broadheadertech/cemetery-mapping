@@ -207,6 +207,80 @@ export function LotForm({
         </div>
       )}
 
+      {/*
+        What a lot actually is, before any of the boxes.
+
+        Every field below is a label somebody else will read later — on
+        a contract, on a receipt, on the map, or out loud to a family
+        looking for a grave. The one thing that is NOT just a label is
+        the code's ordering, and nothing on this form said so.
+      */}
+      {mode === "create" && (
+        <section
+          data-testid="lot-form-guide"
+          className="rounded-md border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700"
+        >
+          <h2 className="text-sm font-semibold text-slate-900">
+            How a lot is described
+          </h2>
+          <p className="mt-1 text-xs leading-relaxed text-slate-600">
+            A lot belongs to a <strong>garden</strong>, sits in a{" "}
+            <strong>block</strong> within that garden, and has a{" "}
+            <strong>row</strong> position inside the block. Its{" "}
+            <strong>code</strong> is the name everyone uses for it
+            afterwards.
+          </p>
+          <dl className="mt-3 space-y-1.5 text-xs leading-relaxed">
+            <div>
+              <dt className="inline font-semibold text-slate-900">
+                Garden ·{" "}
+              </dt>
+              <dd className="inline text-slate-600">
+                the named part of the park — Garden of Faith, Chapel of
+                Grace. Created by an admin under Map → Gardens.
+              </dd>
+            </div>
+            <div>
+              <dt className="inline font-semibold text-slate-900">
+                Block ·{" "}
+              </dt>
+              <dd className="inline text-slate-600">
+                a group of lots inside the garden, usually whatever a
+                path or driveway separates. If your park does not use
+                blocks, put <code className="font-mono">1</code> on
+                everything.
+              </dd>
+            </div>
+            <div>
+              <dt className="inline font-semibold text-slate-900">Row · </dt>
+              <dd className="inline text-slate-600">
+                where the lot sits inside its block.
+              </dd>
+            </div>
+            <div>
+              <dt className="inline font-semibold text-slate-900">
+                Code ·{" "}
+              </dt>
+              <dd className="inline text-slate-600">
+                the unique reference. Most parks combine the three:{" "}
+                <code className="font-mono">A-1-01</code> for garden A,
+                block 1, lot 01.
+              </dd>
+            </div>
+          </dl>
+          <p className="mt-3 rounded border border-amber-300 bg-amber-50 px-2.5 py-2 text-xs leading-relaxed text-amber-900">
+            <strong className="font-semibold">
+              Number the codes in the order the lots physically sit.
+            </strong>{" "}
+            Until a lot has a measured position, the 3D map draws each
+            garden as a grid filled in code order — so the codes are the
+            arrangement. Everything else here can be edited later
+            without consequence; this is the one that is awkward to
+            change once contracts reference it.
+          </p>
+        </section>
+      )}
+
       <div className="space-y-1">
         <label
           htmlFor="lot-code"
@@ -214,6 +288,11 @@ export function LotForm({
         >
           Code
         </label>
+        <p id="lot-code-hint" className="text-xs leading-snug text-slate-500">
+          {mode === "edit"
+            ? "Fixed once created — contracts, receipts and records already reference it."
+            : "The name this lot carries on every contract, receipt and record. Must be unique across the park."}
+        </p>
         <input
           id="lot-code"
           type="text"
@@ -221,7 +300,9 @@ export function LotForm({
           disabled={mode === "edit"}
           aria-invalid={errors.code !== undefined}
           aria-describedby={
-            errors.code !== undefined ? "lot-code-error" : undefined
+            errors.code !== undefined
+              ? "lot-code-error lot-code-hint"
+              : "lot-code-hint"
           }
           className={cn(
             "block w-full rounded-md border border-slate-300 px-3 py-2 text-sm",
@@ -296,12 +377,14 @@ export function LotForm({
         <FieldText
           id="lot-block"
           label="Block"
+          hint="A group of lots inside the garden — usually whatever a path or driveway separates. Any short label: 1, 2, A."
           error={errors.block?.message}
           {...register("block")}
         />
         <FieldText
           id="lot-row"
           label="Row"
+          hint="Where this lot sits inside its block. A label, not a calculation — 01, 02, 03."
           error={errors.row?.message}
           {...register("row")}
         />
@@ -309,6 +392,11 @@ export function LotForm({
 
       <fieldset className="space-y-2">
         <legend className="text-sm font-medium text-slate-700">Type</legend>
+        <p className="text-xs leading-snug text-slate-500">
+          Decides how many interments the lot holds and how it is drawn
+          on the 3D map. Single and family are ground plots; mausoleum is
+          a built structure; niche is a columbarium vault.
+        </p>
         <div
           className="flex flex-wrap gap-3"
           role="radiogroup"
@@ -333,6 +421,17 @@ export function LotForm({
           <p className="text-xs text-red-600">{errors.type.message}</p>
         )}
       </fieldset>
+
+      <p className="text-xs leading-snug text-slate-500">
+        <strong className="font-medium text-slate-700">
+          Width and depth
+        </strong>{" "}
+        are the lot&rsquo;s real size on the ground, in metres. They give
+        the square-metre figure shown to families, and they are the
+        footprint drawn around the point when somebody sets this
+        lot&rsquo;s location. A standard single grave is about 2.5m ×
+        1.2m.
+      </p>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="space-y-1">
@@ -402,6 +501,11 @@ export function LotForm({
         >
           Base price (₱)
         </label>
+        <p className="text-xs leading-snug text-slate-500">
+          The list price before any discount, promo or payment plan.
+          Those are applied on the sale, not here — so this stays the
+          same number for every buyer of a comparable lot.
+        </p>
         <div className="relative">
           <span
             className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-sm text-slate-500"
@@ -466,6 +570,7 @@ export function LotForm({
 const FieldText = ({
   id,
   label,
+  hint,
   error,
   name,
   onChange,
@@ -474,6 +579,8 @@ const FieldText = ({
 }: {
   id: string;
   label: string;
+  /** What the field is for, in the words of somebody who runs a park. */
+  hint?: string;
   error?: string;
   name: string;
   // The shape RHF's `register` returns:
@@ -485,12 +592,24 @@ const FieldText = ({
     <label htmlFor={id} className="block text-sm font-medium text-slate-700">
       {label}
     </label>
+    {hint !== undefined && (
+      <p id={`${id}-hint`} className="text-xs leading-snug text-slate-500">
+        {hint}
+      </p>
+    )}
     <input
       id={id}
       type="text"
       autoComplete="off"
       aria-invalid={error !== undefined}
-      aria-describedby={error !== undefined ? `${id}-error` : undefined}
+      aria-describedby={
+        [
+          error !== undefined ? `${id}-error` : null,
+          hint !== undefined ? `${id}-hint` : null,
+        ]
+          .filter((x): x is string => x !== null)
+          .join(" ") || undefined
+      }
       className={cn(
         "block w-full rounded-md border border-slate-300 px-3 py-2 text-sm",
         "focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500",
