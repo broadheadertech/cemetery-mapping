@@ -87,13 +87,13 @@ describe("zooming the map", () => {
     // and its view reset — which is what "it reloads" looked like.
     useQueryMock.mockReturnValue([lot()]);
     const { rerender } = render(
-      <LotMap initialBbox={BBOX} forceRenderer="leaflet" />,
+      <LotMap bbox={BBOX} forceRenderer="leaflet" onLotClick={() => {}} />,
     );
     const before = screen.getByTestId("leaflet");
 
     // The zoom: new bbox, query in flight.
     useQueryMock.mockReturnValue(undefined);
-    rerender(<LotMap initialBbox={BBOX} forceRenderer="leaflet" />);
+    rerender(<LotMap bbox={BBOX} forceRenderer="leaflet" onLotClick={() => {}} />);
 
     const during = screen.getByTestId("leaflet");
     expect(during).toBe(before);
@@ -103,10 +103,10 @@ describe("zooming the map", () => {
   it("says it is updating without covering the map", () => {
     useQueryMock.mockReturnValue([lot()]);
     const { rerender } = render(
-      <LotMap initialBbox={BBOX} forceRenderer="leaflet" />,
+      <LotMap bbox={BBOX} forceRenderer="leaflet" onLotClick={() => {}} />,
     );
     useQueryMock.mockReturnValue(undefined);
-    rerender(<LotMap initialBbox={BBOX} forceRenderer="leaflet" />);
+    rerender(<LotMap bbox={BBOX} forceRenderer="leaflet" onLotClick={() => {}} />);
 
     expect(screen.getByTestId("map-refreshing")).toBeInTheDocument();
     expect(screen.getByTestId("leaflet")).toBeInTheDocument();
@@ -115,7 +115,7 @@ describe("zooming the map", () => {
   it("still blocks before the very first result", () => {
     // There is genuinely nothing to show yet, and no map to protect.
     useQueryMock.mockReturnValue(undefined);
-    render(<LotMap initialBbox={BBOX} forceRenderer="leaflet" />);
+    render(<LotMap bbox={BBOX} forceRenderer="leaflet" onLotClick={() => {}} />);
     expect(screen.getByTestId("map-loading")).toBeInTheDocument();
   });
 
@@ -124,12 +124,12 @@ describe("zooming the map", () => {
     // control, so zooming into a bare corner stranded you there.
     useQueryMock.mockReturnValue([lot()]);
     const { rerender } = render(
-      <LotMap initialBbox={BBOX} forceRenderer="leaflet" />,
+      <LotMap bbox={BBOX} forceRenderer="leaflet" onLotClick={() => {}} />,
     );
     const before = screen.getByTestId("leaflet");
 
     useQueryMock.mockReturnValue([]);
-    rerender(<LotMap initialBbox={BBOX} forceRenderer="leaflet" />);
+    rerender(<LotMap bbox={BBOX} forceRenderer="leaflet" onLotClick={() => {}} />);
 
     expect(screen.getByTestId("leaflet")).toBe(before);
     expect(screen.queryByTestId("map-empty")).toBeNull();
@@ -140,13 +140,13 @@ describe("zooming the map", () => {
     // Auto mode picks Leaflet once anything is surveyed. Panning into
     // placeholder-only lots used to un-pick it and tear the map down.
     useQueryMock.mockReturnValue([lot()]);
-    const { rerender } = render(<LotMap initialBbox={BBOX} />);
+    const { rerender } = render(<LotMap bbox={BBOX} onLotClick={() => {}} />);
     const before = screen.getByTestId("leaflet");
 
     useQueryMock.mockReturnValue([
       lot({ _id: "lots:b", code: "B-01", geometryStatus: "placeholder" }),
     ]);
-    rerender(<LotMap initialBbox={BBOX} />);
+    rerender(<LotMap bbox={BBOX} onLotClick={() => {}} />);
 
     expect(screen.getByTestId("leaflet")).toBe(before);
   });
@@ -156,10 +156,10 @@ describe("zooming the map", () => {
     // every lot off and on again on every zoom step.
     useQueryMock.mockReturnValue([lot(), lot({ _id: "lots:b", code: "A-02" })]);
     const { rerender } = render(
-      <LotMap initialBbox={BBOX} forceRenderer="leaflet" />,
+      <LotMap bbox={BBOX} forceRenderer="leaflet" onLotClick={() => {}} />,
     );
     useQueryMock.mockReturnValue(undefined);
-    rerender(<LotMap initialBbox={BBOX} forceRenderer="leaflet" />);
+    rerender(<LotMap bbox={BBOX} forceRenderer="leaflet" onLotClick={() => {}} />);
 
     expect(screen.getByTestId("leaflet")).toHaveAttribute("data-lots", "2");
   });

@@ -117,10 +117,16 @@ describe("LotDetail", () => {
   });
 
   it("renders the geometry-status pill (placeholder + surveyed)", () => {
+    // Scoped to the facts panel. The page now also carries the GPS
+    // capture panel, whose copy talks about surveys at length — a
+    // document-wide text search for /Surveyed/i matches that prose too,
+    // and would keep matching whatever else the page grows.
     const { rerender } = render(
       <LotDetail detail={baseDetail} roles={["office_staff"]} />,
     );
-    expect(screen.getByText(/Placeholder/i)).toBeInTheDocument();
+    const facts = () =>
+      screen.getByRole("region", { name: /lot facts/i });
+    expect(within(facts()).getByText(/Placeholder/i)).toBeInTheDocument();
 
     rerender(
       <LotDetail
@@ -128,7 +134,7 @@ describe("LotDetail", () => {
         roles={["office_staff"]}
       />,
     );
-    expect(screen.getByText(/Surveyed/i)).toBeInTheDocument();
+    expect(within(facts()).getByText(/Surveyed/i)).toBeInTheDocument();
   });
 
   it("shows Edit and Retire for office_staff", () => {
