@@ -630,11 +630,16 @@ function validateDescription(description: string): void {
 /**
  * Set how a garden is drawn on the 3D map.
  *
- * Separate from `updateSection` because it is a different act with a
- * different audience: renaming a garden is a records decision, and
- * saying it is six lots across is a drawing decision somebody makes
- * while looking at the map. Office staff may do it — they are the ones
- * who know the garden — where the rest of `updateSection` is admin-only.
+ * Separate from `updateSection` because it is a different act: renaming
+ * a garden is a records decision, and saying it is six lots across is a
+ * drawing decision somebody makes while looking at the map.
+ *
+ * Admin-only, matching where the control lives. It was written to admit
+ * office staff on the reasoning that they are the ones who know the
+ * garden — but the only screen that calls it sits under `/admin`, which
+ * middleware keeps them off entirely. A permission nobody can exercise
+ * is not a generosity, it is a misleading line in an audit of who can
+ * do what.
  *
  * The grid does not have to match the lot count. A garden with 28 lots
  * drawn 6×5 shows 28 of 30 cells filled, which is what the ground looks
@@ -656,7 +661,7 @@ export const setSectionLayout = mutationGeneric({
       tintHex?: number;
     },
   ): Promise<{ sectionId: SectionId }> => {
-    await requireRole(ctx, ["admin", "office_staff"]);
+    await requireRole(ctx, ["admin"]);
 
     const existing = await ctx.db.get(args.sectionId);
     if (existing === null) {

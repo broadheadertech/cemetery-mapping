@@ -239,6 +239,17 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
         requiredRoles: ["admin"],
       },
       {
+        // The gardens themselves, and how each one is arranged on the
+        // 3D map. Reachable only from the admin hub until now, which is
+        // two clicks past where anybody looks for it — and setting a
+        // garden's layout is a thing somebody does while looking at the
+        // map, not while spelunking a settings page.
+        href: "/admin/sections",
+        label: "Gardens & map layout",
+        icon: Boxes,
+        requiredRoles: ["admin"],
+      },
+      {
         // What the cemetery charges, and the offers on top. Admin-only:
         // office staff read plans to fill a sale form and must not be
         // able to mint one on the way to closing a sale.
