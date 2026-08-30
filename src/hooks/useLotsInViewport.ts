@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { useQuery } from "convex/react";
 import { makeFunctionReference } from "convex/server";
 
@@ -31,9 +31,25 @@ import { useDebouncedValue } from "@/hooks/useDebouncedValue";
  *     subscription — that's the canonical pattern from Story 1.10.
  *
  * Return shape:
- *   - `lots: undefined` — first render or query in-flight.
+ *   - `lots: undefined` — before the FIRST result only.
  *   - `lots: LotForMap[]` — query resolved, may be empty.
- *   - `isLoading` is a derived boolean: `lots === undefined`.
+ *   - `isLoading` — true only while there is nothing to draw at all.
+ *   - `isRefreshing` — true while a newer viewport is in flight and the
+ *     previous lots are still on screen.
+ *
+ * Stale-while-revalidate, and not as an optimisation.
+ *
+ * Every zoom or pan changes the bbox, which changes the query args,
+ * which makes Convex's `useQuery` return `undefined` again. The caller
+ * rendered a "Loading map…" placeholder on `undefined`, so the entire
+ * Leaflet instance was UNMOUNTED on every zoom and rebuilt from
+ * scratch — refetching all its tiles and resetting the view, which
+ * looked exactly like the map reloading underneath you.
+ *
+ * Holding the last result keeps the map mounted and lets the markers
+ * update in place, which is what the renderer was always built to do:
+ * its bootstrap effect has empty deps and its marker effect keys on
+ * `lots`.
  */
 export interface LotForMap {
   _id: string;
@@ -58,7 +74,10 @@ export interface UseLotsInViewportArgs {
 
 export interface UseLotsInViewportResult {
   lots: LotForMap[] | undefined;
+  /** Nothing to draw yet. Distinct from a refresh over existing lots. */
   isLoading: boolean;
+  /** A newer viewport is in flight; what is on screen is the old one. */
+  isRefreshing: boolean;
 }
 
 const listInBboxRef = makeFunctionReference<
@@ -140,8 +159,28 @@ export function useLotsInViewport(
         ? raw.filter((lot) => statusFilters.includes(lot.status))
         : raw;
 
+  /*
+   * The last lots we had, so a zoom does not blank the map.
+   *
+   * Keyed by the status filter, not just held forever: showing stale
+   * markers through a viewport change is a fair trade for keeping the
+   * map alive, but showing lots somebody has just filtered OUT would be
+   * answering a question they did not ask.
+   */
+  const filterKey =
+    statusFilters === undefined ? "" : [...statusFilters].sort().join(",");
+  const cache = useRef<{ key: string; lots: LotForMap[] } | null>(null);
+  if (filtered !== undefined) {
+    cache.current = { key: filterKey, lots: filtered };
+  } else if (cache.current !== null && cache.current.key !== filterKey) {
+    cache.current = null;
+  }
+
+  const lots = filtered ?? cache.current?.lots;
+
   return {
-    lots: filtered,
-    isLoading: filtered === undefined,
+    lots,
+    isLoading: lots === undefined,
+    isRefreshing: filtered === undefined && lots !== undefined,
   };
 }

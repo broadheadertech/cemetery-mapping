@@ -1,6 +1,13 @@
 "use client";
 
-import { Component, useCallback, useMemo, useState, type ReactNode } from "react";
+import {
+  Component,
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import dynamic from "next/dynamic";
 import { DEFAULT_CEMETERY_BBOX, type Bbox } from "@/lib/geometry";
 import { useLotsInViewport } from "@/hooks/useLotsInViewport";
@@ -113,10 +120,21 @@ export function LotMap({
     setLiveBbox(next);
   }, []);
 
-  const { lots, isLoading } = useLotsInViewport({
+  const { lots, isLoading, isRefreshing } = useLotsInViewport({
     bbox: effectiveBbox,
     statusFilters,
   });
+
+  /*
+   * Once Leaflet is up, it stays up.
+   *
+   * The renderer used to be re-chosen on every result: pan into a
+   * stretch of placeholder-only lots and `hasSurveyed` went false, the
+   * SVG renderer took over, and the live map was torn down mid-gesture.
+   * Sticky because a map you are navigating is state, not a function of
+   * whatever happens to be in the current viewport.
+   */
+  const wentLive = useRef(false);
 
   if (isLoading) {
     return (
@@ -133,8 +151,22 @@ export function LotMap({
     );
   }
 
-  // `lots` is defined here. Empty viewport → empty state.
-  if (lots !== undefined && lots.length === 0) {
+  const safeLots = lots ?? [];
+  const hasSurveyed = safeLots.some((l) => l.geometryStatus === "surveyed");
+  if (hasSurveyed) wentLive.current = true;
+  const renderer: LotMapRenderer =
+    forceRenderer ?? (wentLive.current ? "leaflet" : "svg");
+
+  /*
+   * An empty viewport is an empty viewport, not a reason to remove the
+   * map. Zooming into a corner with no lots used to replace Leaflet
+   * with a message — and since the message has no zoom control, there
+   * was no way back out except reloading the page.
+   *
+   * The SVG renderer has nothing to show and no navigation of its own,
+   * so it keeps the empty state.
+   */
+  if (lots !== undefined && lots.length === 0 && renderer !== "leaflet") {
     return (
       <div
         role="status"
@@ -152,11 +184,6 @@ export function LotMap({
     );
   }
 
-  const safeLots = lots ?? [];
-  const hasSurveyed = safeLots.some((l) => l.geometryStatus === "surveyed");
-  const renderer: LotMapRenderer =
-    forceRenderer ?? (hasSurveyed ? "leaflet" : "svg");
-
   const svgFallback = (
     <SvgRenderer
       bbox={effectiveBbox}
@@ -170,15 +197,36 @@ export function LotMap({
   if (renderer === "leaflet") {
     return (
       <LeafletErrorBoundary fallback={svgFallback}>
-        <LeafletRenderer
-          bbox={effectiveBbox}
-          lots={safeLots}
-          onLotClick={onLotClick}
-          height={height}
-          selectedLotId={selectedLotId}
-          onBboxChange={handleLeafletBboxChange}
-          focusPoint={focusPoint}
-        />
+        <div className="relative">
+          <LeafletRenderer
+            bbox={effectiveBbox}
+            lots={safeLots}
+            onLotClick={onLotClick}
+            height={height}
+            selectedLotId={selectedLotId}
+            onBboxChange={handleLeafletBboxChange}
+            focusPoint={focusPoint}
+          />
+          {/* Overlays, so the map underneath keeps its zoom and pan. */}
+          {isRefreshing && (
+            <div
+              role="status"
+              data-testid="map-refreshing"
+              className="pointer-events-none absolute right-3 top-3 z-[1000] rounded-md border border-surface-border bg-surface-base/90 px-2.5 py-1 text-[11px] text-text-muted"
+            >
+              Updating&hellip;
+            </div>
+          )}
+          {!isRefreshing && safeLots.length === 0 && (
+            <div
+              role="status"
+              data-testid="map-empty-overlay"
+              className="pointer-events-none absolute left-1/2 top-3 z-[1000] -translate-x-1/2 rounded-md border border-surface-border bg-surface-base/90 px-3 py-1.5 text-xs text-text-muted"
+            >
+              No lots in this view.
+            </div>
+          )}
+        </div>
       </LeafletErrorBoundary>
     );
   }
