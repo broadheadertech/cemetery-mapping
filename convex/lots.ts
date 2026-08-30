@@ -65,6 +65,7 @@ import { DEFAULT_CAPACITY_UNITS } from "./lib/lotCapacity";
 type DataModel = DataModelFromSchemaDefinition<typeof schema>;
 type LotDoc = DataModel["lots"]["document"];
 type LotId = LotDoc["_id"];
+type StorageId = NonNullable<LotDoc["photoStorageId"]>;
 
 /**
  * Lot status validator — matches the schema's `v.union(v.literal(...))`
@@ -1080,5 +1081,292 @@ export const getLotByCode = internalQueryGeneric({
       .query("lots")
       .withIndex("by_code", (q) => q.eq("code", args.code))
       .first();
+  },
+});
+
+/**
+ * Everything the 3D map needs, and nothing else.
+ *
+ * `listLots` returns whole lot documents — every field, including the
+ * `geometry` blob with its polygon array and four bounding-box numbers,
+ * for every lot in the park. The map reads none of that. At two
+ * thousand lots it was shipping a payload measured in megabytes to draw
+ * a few hundred coloured boxes.
+ *
+ * This returns eight scalars per lot, for the gardens actually being
+ * drawn. Area comes pre-computed from `dimensions` because the client
+ * should not be doing arithmetic it can be handed.
+ */
+export interface MapLot {
+  _id: LotId;
+  code: string;
+  section: string;
+  block: string;
+  status: string;
+  type: string;
+  basePriceCents: number;
+  /** Width × depth, in square metres, rounded to one decimal. */
+  areaSqm: number;
+  /** True when a photograph has been attached. */
+  hasPhoto: boolean;
+}
+
+/** A garden's layout, as the map should draw it. */
+export interface MapSection {
+  name: string;
+  displayName: string;
+  sortOrder: number;
+  columns: number;
+  rows: number;
+  tintHex: number | null;
+  /** Lots actually in this garden. */
+  lotCount: number;
+  /**
+   * True when the grid was guessed rather than configured. The map says
+   * so, because a layout nobody chose should not be mistaken for one
+   * somebody did.
+   */
+  layoutIsDerived: boolean;
+}
+
+export interface MapData {
+  sections: MapSection[];
+  lots: MapLot[];
+}
+
+/**
+ * A square-ish grid that holds `count` lots.
+ *
+ * The fallback when a garden has no configured layout. It is a guess,
+ * and it is flagged as one — but drawing a garden in a sensible shape
+ * beats drawing nothing while somebody goes and configures it.
+ */
+export function deriveGrid(count: number): {
+  columns: number;
+  rows: number;
+} {
+  if (count <= 0) return { columns: 1, rows: 1 };
+  const columns = Math.max(1, Math.ceil(Math.sqrt(count)));
+  const rows = Math.max(1, Math.ceil(count / columns));
+  return { columns, rows };
+}
+
+/** Square metres from a lot's dimensions, to one decimal. */
+export function areaOf(dimensions: {
+  widthM: number;
+  depthM: number;
+}): number {
+  const w = Number.isFinite(dimensions.widthM) ? dimensions.widthM : 0;
+  const d = Number.isFinite(dimensions.depthM) ? dimensions.depthM : 0;
+  return Math.round(w * d * 10) / 10;
+}
+
+/**
+ * The map's data, in one read.
+ *
+ * Field workers may run it — the map is how somebody finds a grave on
+ * the ground, which is their job more than anybody's.
+ */
+export const listForMap = queryGeneric({
+  args: {
+    /** Gardens to draw. Omitted means every garden with lots in it. */
+    sectionNames: v.optional(v.array(v.string())),
+  },
+  handler: async (
+    ctx: QueryCtx,
+    args: { sectionNames?: string[] },
+  ): Promise<MapData> => {
+    await requireRole(ctx, ["admin", "office_staff", "field_worker"]);
+
+    const wanted =
+      args.sectionNames !== undefined && args.sectionNames.length > 0
+        ? new Set(args.sectionNames)
+        : null;
+
+    const allLots = await ctx.db.query("lots").collect();
+    const live = allLots.filter(
+      (l) => !l.isRetired && (wanted === null || wanted.has(l.section)),
+    );
+
+    const lots: MapLot[] = live
+      .map((l) => ({
+        _id: l._id,
+        code: l.code,
+        section: l.section,
+        block: l.block,
+        status: l.status,
+        type: l.type,
+        basePriceCents: l.basePriceCents,
+        areaSqm: areaOf(l.dimensions),
+        hasPhoto: l.photoStorageId !== undefined,
+      }))
+      // Code order is the layout order — the map fills its grid from
+      // this list, so the sort here IS the arrangement on screen.
+      .sort((a, b) => a.code.localeCompare(b.code));
+
+    const counts = new Map<string, number>();
+    for (const l of lots) {
+      counts.set(l.section, (counts.get(l.section) ?? 0) + 1);
+    }
+
+    const registry = await ctx.db.query("sections").collect();
+    const byName = new Map(registry.filter((s) => !s.isRetired).map((s) => [s.name, s]));
+
+    const sections: MapSection[] = [...counts.entries()].map(
+      ([name, lotCount]) => {
+        const row = byName.get(name);
+        const configured =
+          row?.gridColumns !== undefined && row.gridRows !== undefined;
+        const grid = configured
+          ? { columns: row.gridColumns as number, rows: row.gridRows as number }
+          : deriveGrid(lotCount);
+        return {
+          name,
+          displayName: row?.displayName ?? name,
+          sortOrder: row?.sortOrder ?? 0,
+          columns: grid.columns,
+          rows: grid.rows,
+          tintHex: row?.tintHex ?? null,
+          lotCount,
+          layoutIsDerived: !configured,
+        };
+      },
+    );
+    sections.sort(
+      (a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name),
+    );
+
+    return { sections, lots };
+  },
+});
+
+/**
+ * One lot, in the detail the map's side panel shows.
+ *
+ * Split from the list on purpose: a photograph URL per lot, fetched for
+ * every lot in the park, would undo the whole point of the light list.
+ * This is read when somebody actually clicks something.
+ */
+export interface MapLotDetail {
+  _id: LotId;
+  code: string;
+  section: string;
+  block: string;
+  row: string;
+  status: string;
+  type: string;
+  basePriceCents: number;
+  areaSqm: number;
+  widthM: number;
+  depthM: number;
+  /** Where it is, for anybody trying to find it on the ground. */
+  lat: number | null;
+  lng: number | null;
+  geometryStatus: string;
+  photoUrl: string | null;
+  photoUpdatedAt: number | null;
+}
+
+export const getMapLotDetail = queryGeneric({
+  args: { lotId: v.id("lots") },
+  handler: async (
+    ctx: QueryCtx,
+    args: { lotId: LotId },
+  ): Promise<MapLotDetail | null> => {
+    await requireRole(ctx, ["admin", "office_staff", "field_worker"]);
+
+    const lot = await ctx.db.get(args.lotId);
+    if (lot === null) return null;
+
+    const centroid = lot.geometry.centroid;
+    // A placeholder centroid is a stand-in written at lot creation, not
+    // a position anybody measured. Reporting it as a location would
+    // send somebody to the wrong part of the park with confidence.
+    const surveyed = lot.geometryStatus === "surveyed";
+
+    return {
+      _id: lot._id,
+      code: lot.code,
+      section: lot.section,
+      block: lot.block,
+      row: lot.row,
+      status: lot.status,
+      type: lot.type,
+      basePriceCents: lot.basePriceCents,
+      areaSqm: areaOf(lot.dimensions),
+      widthM: lot.dimensions.widthM,
+      depthM: lot.dimensions.depthM,
+      lat: surveyed ? centroid.lat : null,
+      lng: surveyed ? centroid.lng : null,
+      geometryStatus: lot.geometryStatus,
+      photoUrl:
+        lot.photoStorageId !== undefined
+          ? await ctx.storage.getUrl(lot.photoStorageId)
+          : null,
+      photoUpdatedAt: lot.photoUpdatedAt ?? null,
+    };
+  },
+});
+
+/** A one-time URL to POST a lot photograph to. */
+export const generateLotPhotoUploadUrl = mutationGeneric({
+  args: {},
+  handler: async (ctx: MutationCtx): Promise<string> => {
+    // Field workers take these. They are standing at the lot.
+    await requireRole(ctx, ["admin", "office_staff", "field_worker"]);
+    return await ctx.storage.generateUploadUrl();
+  },
+});
+
+/**
+ * Attach a photograph to a lot, replacing any previous one.
+ *
+ * The old blob is deleted rather than orphaned. A lot has one
+ * representative picture; keeping every superseded attempt would fill
+ * storage with images nothing references and nobody can find.
+ */
+export const setLotPhoto = mutationGeneric({
+  args: { lotId: v.id("lots"), storageId: v.id("_storage") },
+  handler: async (
+    ctx: MutationCtx,
+    args: { lotId: LotId; storageId: StorageId },
+  ): Promise<{ lotId: LotId }> => {
+    const auth = await requireRole(ctx, [
+      "admin",
+      "office_staff",
+      "field_worker",
+    ]);
+
+    const lot = await ctx.db.get(args.lotId);
+    if (lot === null) {
+      throwError(ErrorCode.NOT_FOUND, "Lot not found.", { lotId: args.lotId });
+    }
+    if (lot.isRetired) {
+      throwError(
+        ErrorCode.INVARIANT_VIOLATION,
+        "This lot has been retired.",
+        { lotId: args.lotId },
+      );
+    }
+
+    const previous = lot.photoStorageId;
+    await ctx.db.patch(args.lotId, {
+      photoStorageId: args.storageId,
+      photoUpdatedAt: Date.now(),
+    });
+    if (previous !== undefined && previous !== args.storageId) {
+      await ctx.storage.delete(previous);
+    }
+
+    await emitAudit(ctx, {
+      action: "update",
+      entityType: "lot",
+      entityId: args.lotId,
+      after: { photoStorageId: args.storageId as unknown as string },
+      reason: `Photograph attached to lot ${lot.code}`,
+    });
+    void auth;
+
+    return { lotId: args.lotId };
   },
 });

@@ -316,6 +316,20 @@ export default defineSchema({
       v.literal("placeholder"),
       v.literal("surveyed"),
     ),
+    /**
+     * A photograph of the lot as it stands.
+     *
+     * This is what "surveyed" means in practice for a park this size: a
+     * picture somebody took, not a polygon somebody paid a surveyor
+     * for. It is what a family recognises and what an office needs to
+     * settle "is this the one by the tree" — and `geometry.polygon` has
+     * never answered that question for anybody.
+     *
+     * Distinct from `lotConditionLogs.photoStorageId`, which is a dated
+     * observation of a problem. This is the representative image.
+     */
+    photoStorageId: v.optional(v.id("_storage")),
+    photoUpdatedAt: v.optional(v.number()),
     isRetired: v.boolean(),
     createdAt: v.number(),
     createdBy: v.id("users"),
@@ -393,6 +407,25 @@ export default defineSchema({
       v.literal("columbarium"),
     ),
     descriptionMarkdown: v.optional(v.string()),
+    /**
+     * How this garden is laid out on the 3D map: a grid, columns across
+     * by rows deep.
+     *
+     * The map is a VISUAL REPRESENTATION, not a survey. Lots fill the
+     * grid in code order; a lot's position here is its place in that
+     * order, not where it stands in the ground. That is a deliberate
+     * choice — a schematic that loads instantly is more useful at a
+     * counter than a surveyed model that does not.
+     *
+     * Optional so every section that existed before this stays valid.
+     * Absent means the map falls back to a square-ish grid sized to the
+     * lots actually in the garden, which is a reasonable guess and
+     * always better than drawing nothing.
+     */
+    gridColumns: v.optional(v.number()),
+    gridRows: v.optional(v.number()),
+    /** Turf colour for the garden's pad, as `0xRRGGBB`. */
+    tintHex: v.optional(v.number()),
     geometryBoundsBox: v.optional(
       v.object({
         minLat: v.number(),
