@@ -973,17 +973,93 @@ export const updateLotGeometry = internalMutationGeneric({
  * (server-enforced). Emits the same geometry audit shape as
  * `updateLotGeometry`.
  */
+/**
+ * The roughest phone reading that may be saved, in metres.
+ *
+ * Ten graves' width. Past this a fix is not a position, it is a
+ * neighbourhood — and it would sit on the map looking exactly like a
+ * surveyed corner. Mirrors `MAX_USABLE_ACCURACY_M` in
+ * `src/lib/gpsCapture.ts`; the browser refuses first, and this refuses
+ * again because the browser is not a trust boundary.
+ */
+export const MAX_GPS_ACCURACY_M = 25;
+
 export const setLotLocation = mutationGeneric({
   args: {
     lotId: v.id("lots"),
     lat: v.number(),
     lng: v.number(),
+    /**
+     * How this position was obtained. Defaults to `clicked`, which is
+     * what every existing caller does.
+     */
+    source: v.optional(v.union(v.literal("clicked"), v.literal("gps"))),
+    /** The radius a GPS capture claimed, in metres. */
+    accuracyM: v.optional(v.number()),
   },
   handler: async (
     ctx: MutationCtx,
-    args: { lotId: LotId; lat: number; lng: number },
+    args: {
+      lotId: LotId;
+      lat: number;
+      lng: number;
+      source?: "clicked" | "gps";
+      accuracyM?: number;
+    },
   ): Promise<void> => {
-    await requireRole(ctx, ["admin", "office_staff"]);
+    /*
+     * Field workers may capture a position, but only from a phone at
+     * the lot, and only where there is not already a better one.
+     *
+     * They are the people standing in the park — a position that has to
+     * go through the office is a position nobody records. But a phone
+     * fix is metres-accurate at best, and letting one overwrite an
+     * imported survey would quietly downgrade measured ground to a
+     * guess with no way to tell afterwards.
+     *
+     * The gate is the widest of the two role sets so it can be the
+     * first thing this function does, then narrowed immediately below.
+     */
+    const caller = await requireRole(ctx, [
+      "admin",
+      "office_staff",
+      "field_worker",
+    ]);
+
+    const source = args.source ?? "clicked";
+    const isOffice = caller.roles.some(
+      (r) => r === "admin" || r === "office_staff",
+    );
+
+    // Clicking a point on a map is not a thing done at the graveside.
+    if (source !== "gps" && !isOffice) {
+      throwError(
+        ErrorCode.FORBIDDEN,
+        "Setting a location from the map is office work. From the lot itself, use the GPS capture.",
+        { lotId: args.lotId },
+      );
+    }
+
+    if (source === "gps") {
+      if (
+        args.accuracyM === undefined ||
+        !Number.isFinite(args.accuracyM) ||
+        args.accuracyM <= 0
+      ) {
+        throwError(
+          ErrorCode.VALIDATION,
+          "A GPS capture must say how accurate it is.",
+          { accuracyM: args.accuracyM ?? null },
+        );
+      }
+      if (args.accuracyM > MAX_GPS_ACCURACY_M) {
+        throwError(
+          ErrorCode.VALIDATION,
+          `That reading is accurate to about ${Math.round(args.accuracyM)}m, which is too rough to place a lot. Try again in the open.`,
+          { accuracyM: args.accuracyM },
+        );
+      }
+    }
 
     const point: LatLng = { lat: args.lat, lng: args.lng };
     if (!isCoordInManilaSanityRange(point)) {
@@ -1019,9 +1095,34 @@ export const setLotLocation = mutationGeneric({
     const bbox = bboxFromPolygon(polygon, point);
     const nextGeometry: LotGeometry = { centroid: point, polygon, ...bbox };
 
+    /*
+     * A phone must not overwrite a real survey.
+     *
+     * Imported geometry is a measured outline at a measured angle; a
+     * GPS capture is a point with a radius round it. Replacing the
+     * first with the second loses information that cannot be recovered,
+     * and would look identical on the map afterwards.
+     */
+    if (
+      source === "gps" &&
+      before.geometrySource === "imported" &&
+      !isOffice
+    ) {
+      throwError(
+        ErrorCode.FORBIDDEN,
+        "This lot has a surveyed position from a survey file. A phone reading cannot replace it — ask the office if it is wrong.",
+        { lotId: args.lotId },
+      );
+    }
+
     await ctx.db.patch(args.lotId, {
       geometry: nextGeometry,
       geometryStatus: "surveyed",
+      geometrySource: source,
+      geometryCapturedAt: Date.now(),
+      ...(source === "gps" && args.accuracyM !== undefined
+        ? { geometryAccuracyM: args.accuracyM }
+        : {}),
     });
 
     await emitAudit(ctx, {

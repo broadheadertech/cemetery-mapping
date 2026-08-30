@@ -1,0 +1,1 @@
+export { LotGpsCapture } from "./LotGpsCapture";

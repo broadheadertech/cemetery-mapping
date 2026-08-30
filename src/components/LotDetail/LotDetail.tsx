@@ -45,6 +45,7 @@ import { translateError } from "@/lib/errors";
 import { ActiveContractPanel } from "./ActiveContractPanel";
 import { ConditionLogsPanel } from "./ConditionLogsPanel";
 import { LotPhotoPanel } from "./LotPhotoPanel";
+import { LotGpsCapture } from "@/components/LotGpsCapture";
 import { LotFactsPanel, type LotFactsData } from "./LotFactsPanel";
 import { OccupantsPanel } from "./OccupantsPanel";
 import { OwnershipPanel } from "./OwnershipPanel";
@@ -165,6 +166,14 @@ export function LotDetail({ detail, roles = [], onRetire }: LotDetailProps) {
           is what the lot IS, the other is a dated note about a problem
           with it. */}
       <LotPhotoPanel lotId={detail._id} />
+      {/* Beside the photograph because they are the same errand: the
+          two things worth recording while actually standing at the lot,
+          and the two a field worker can do without the office. */}
+      <LotGpsCapture
+        lotId={detail._id}
+        lotCode={detail.code}
+        alreadyPlaced={detail.geometryStatus === "surveyed"}
+      />
       <ConditionLogsPanel lotId={detail._id} />
 
       <ActionRow

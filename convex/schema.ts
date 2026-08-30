@@ -317,6 +317,45 @@ export default defineSchema({
       v.literal("surveyed"),
     ),
     /**
+     * HOW the position was obtained. Optional — absent on every lot
+     * written before this existed, which is why nothing may assume it.
+     *
+     * `geometryStatus: "surveyed"` was doing the work of three very
+     * different claims:
+     *
+     *   - `imported`  — a real survey. Measured outline, measured angle.
+     *   - `clicked`   — somebody pointed at a map. The centre is real;
+     *                   the outline is a box drawn from the lot's
+     *                   recorded dimensions, square to north.
+     *   - `gps`       — somebody stood at the lot with a phone. The
+     *                   centre is real to within `geometryAccuracyM`,
+     *                   which on a phone is metres, and a grave is
+     *                   2.5m wide.
+     *
+     * They render identically and only one of them is a survey. A map
+     * that cannot tell them apart presents all three with the same
+     * confidence, which is the failure the survey view exists to avoid
+     * — moved one level down.
+     */
+    geometrySource: v.optional(
+      v.union(
+        v.literal("imported"),
+        v.literal("clicked"),
+        v.literal("gps"),
+      ),
+    ),
+    /**
+     * The radius the capture itself claimed, in metres.
+     *
+     * Only meaningful for `gps`. Recorded rather than discarded because
+     * "±4m" and "±30m" are different facts about the same coordinate,
+     * and the person reading the map later cannot tell which they have
+     * unless it was kept.
+     */
+    geometryAccuracyM: v.optional(v.number()),
+    /** When the position was captured, as opposed to last edited. */
+    geometryCapturedAt: v.optional(v.number()),
+    /**
      * A photograph of the lot as it stands.
      *
      * This is what "surveyed" means in practice for a park this size: a
