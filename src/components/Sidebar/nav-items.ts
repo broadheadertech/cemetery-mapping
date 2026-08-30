@@ -20,6 +20,7 @@ import {
   ClipboardCheck,
   LineChart,
   Boxes,
+  Map,
   MessageSquare,
   Sparkles,
 } from "lucide-react";
@@ -236,6 +237,17 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
         href: "/reports",
         label: "Reports",
         icon: FileBarChart,
+        requiredRoles: ["admin"],
+      },
+      {
+        // Building the 3D map, start to finish, on one screen. It sits
+        // above the sections registry deliberately: somebody who wants
+        // "the map" wants the walkthrough, not a table of gardens, and
+        // sending them to the registry first is how the job turned into
+        // six tabs in the first place.
+        href: "/admin/map-setup",
+        label: "Set up the 3D map",
+        icon: Map,
         requiredRoles: ["admin"],
       },
       {

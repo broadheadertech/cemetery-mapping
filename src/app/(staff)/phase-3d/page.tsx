@@ -1,7 +1,12 @@
 "use client";
 
 /**
- * /phase-3d — 3D survey of Phase 1 (the Northwest Parcel).
+ * /phase-3d — the park, in three dimensions.
+ *
+ * Draws whatever gardens the registry holds, not a fixed parcel: the
+ * header used to promise "Phase 1 — Grace, Faith & Hope, 3 sections"
+ * while the scene below it rendered live inventory, so a park with four
+ * gardens was told it had three.
  *
  * The "3D survey review" step (Step 05) of the phase-mapping playbook on
  * `/phase-planning`, and the rotatable Phase-2 map renderer ADR-0008
@@ -38,15 +43,15 @@ export default function Phase3DPage() {
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-primary">
-            3D Survey · 3 sections
+            3D map
           </p>
           <h1 className="mt-2 font-display text-4xl font-semibold tracking-tight text-text-default">
-            Phase 1 — Northwest Parcel
+            The park in three dimensions
           </h1>
           <p className="mt-1 max-w-2xl text-sm text-text-muted">
-            A rotatable survey of the parcel&apos;s three gardens — Grace,
-            Faith &amp; Hope. Drag to orbit, scroll to zoom, click any lot to
-            inspect.
+            Every garden with lots in it, drawn in code order and coloured
+            by status. Drag to orbit, scroll to zoom, click any lot to
+            inspect it.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
