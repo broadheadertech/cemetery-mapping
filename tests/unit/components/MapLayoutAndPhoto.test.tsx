@@ -79,7 +79,7 @@ describe("setting a garden's arrangement", () => {
   it("shows the configured grid when there is one", () => {
     render(layout({ gridColumns: 6, gridRows: 5 }));
     expect(screen.getByTestId("section-layout-toggle")).toHaveTextContent(
-      "6 × 5",
+      "6 across × 5 deep",
     );
     expect(screen.queryByTestId("section-layout-derived")).toBeNull();
   });
@@ -160,6 +160,92 @@ describe("setting a garden's arrangement", () => {
       target: { value: "5" },
     });
     expect(screen.getByTestId("section-layout-save")).toBeDisabled();
+  });
+
+  it("DRAWS the arrangement rather than only describing it", () => {
+    // "Six columns by five rows" is a sentence somebody has to
+    // translate before they can tell whether it matches the garden they
+    // are standing in. Thirty squares in six columns is the same
+    // information with nothing to translate.
+    render(layout({ lotCount: 28 }));
+    fireEvent.click(screen.getByTestId("section-layout-toggle"));
+    fireEvent.change(screen.getByTestId("section-layout-columns"), {
+      target: { value: "6" },
+    });
+    fireEvent.change(screen.getByTestId("section-layout-rows"), {
+      target: { value: "5" },
+    });
+
+    const preview = screen.getByTestId("section-layout-preview");
+    const grid = preview.querySelector("[style*='grid-template-columns']");
+    expect(grid).not.toBeNull();
+    expect(grid?.getAttribute("style")).toContain("repeat(6");
+    expect(grid?.children).toHaveLength(30);
+  });
+
+  it("shows which squares are lots and which are bare ground", () => {
+    // 28 lots in 30 cells. If every square looked the same, the picture
+    // would say the garden is full when two plots are turf.
+    render(layout({ lotCount: 28 }));
+    fireEvent.click(screen.getByTestId("section-layout-toggle"));
+    fireEvent.change(screen.getByTestId("section-layout-columns"), {
+      target: { value: "6" },
+    });
+    fireEvent.change(screen.getByTestId("section-layout-rows"), {
+      target: { value: "5" },
+    });
+
+    const cells = [
+      ...screen
+        .getByTestId("section-layout-preview")
+        .querySelectorAll("span"),
+    ];
+    const filled = cells.filter((el) =>
+      el.className.includes("bg-[#1D5C4D]"),
+    );
+    const empty = cells.filter((el) => el.className.includes("dashed"));
+    expect(filled).toHaveLength(28);
+    expect(empty).toHaveLength(2);
+  });
+
+  it("redraws the picture as the numbers change", () => {
+    render(layout({ lotCount: 28 }));
+    fireEvent.click(screen.getByTestId("section-layout-toggle"));
+    fireEvent.change(screen.getByTestId("section-layout-columns"), {
+      target: { value: "7" },
+    });
+    fireEvent.change(screen.getByTestId("section-layout-rows"), {
+      target: { value: "4" },
+    });
+    let grid = screen
+      .getByTestId("section-layout-preview")
+      .querySelector("[style*='grid-template-columns']");
+    expect(grid?.children).toHaveLength(28);
+
+    fireEvent.change(screen.getByTestId("section-layout-columns"), {
+      target: { value: "4" },
+    });
+    fireEvent.change(screen.getByTestId("section-layout-rows"), {
+      target: { value: "7" },
+    });
+    grid = screen
+      .getByTestId("section-layout-preview")
+      .querySelector("[style*='grid-template-columns']");
+    expect(grid?.getAttribute("style")).toContain("repeat(4");
+  });
+
+  it("says in words what the squares mean", () => {
+    render(layout());
+    fireEvent.click(screen.getByTestId("section-layout-toggle"));
+    fireEvent.change(screen.getByTestId("section-layout-columns"), {
+      target: { value: "3" },
+    });
+    fireEvent.change(screen.getByTestId("section-layout-rows"), {
+      target: { value: "3" },
+    });
+    expect(
+      screen.getByText(/each square is a lot/i),
+    ).toBeInTheDocument();
   });
 
   it("says the codes are the arrangement", () => {
