@@ -82,10 +82,17 @@ describe("internal links point at routes that exist", () => {
       const rel = path.relative(ROOT, file).replace(/\\/g, "/");
       const src = readFileSync(file, "utf8");
 
-      // `href="/x"` and href={`/x/${id}`} — the two forms this codebase
-      // uses. External links, anchors, mailto and tel are not routes.
+      // `href="/x"` and href={`/x/${id}`} — the two JSX forms this
+      // codebase uses. External links, anchors, mailto and tel are not
+      // routes.
+      //
+      // Plus `href: "/x"`, the object-literal form. That is how the
+      // SIDEBAR declares every one of its destinations, so without it
+      // the most-clicked links in the whole app were the ones this
+      // guard did not look at.
       const hrefs = [
         ...src.matchAll(/href=\{?[`"](\/[^`"?#]*)/g),
+        ...src.matchAll(/href:\s*[`"](\/[^`"?#]*)/g),
       ].map((m) => m[1] ?? "");
 
       for (const href of hrefs) {

@@ -20,6 +20,8 @@ import {
   ClipboardCheck,
   LineChart,
   Boxes,
+  LayoutGrid,
+  ListChecks,
   Map,
   MessageSquare,
   Sparkles,
@@ -100,6 +102,51 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
         label: "Lots",
         icon: MapPin,
         requiredRoles: ["admin", "office_staff", "field_worker"],
+      },
+    ],
+  },
+  {
+    /*
+     * Everything to do with the map, in the order somebody meets it.
+     *
+     * These were scattered: the two map screens were in no menu at all
+     * (`/phase-3d` is the post-login landing and still could not be
+     * navigated to), while setting one up sat under Admin between
+     * Reports and Payment plans. Looking at the park and arranging the
+     * park are the same job an hour apart, so they belong together —
+     * and top to bottom the group is now: look at it, then build it.
+     */
+    label: "Map",
+    items: [
+      {
+        // The flat, real-world map — where a lot actually is.
+        href: "/map",
+        label: "Map",
+        icon: Map,
+        requiredRoles: ["admin", "office_staff", "field_worker"],
+      },
+      {
+        // The 3D view. Field workers included: finding a grave on the
+        // ground is more their job than anybody's.
+        href: "/phase-3d",
+        label: "3D map",
+        icon: Boxes,
+        requiredRoles: ["admin", "office_staff", "field_worker"],
+      },
+      {
+        // Building that 3D view, start to finish, on one screen.
+        href: "/admin/map-setup",
+        label: "Set up the 3D map",
+        icon: ListChecks,
+        requiredRoles: ["admin"],
+      },
+      {
+        // The gardens registry underneath it — names, order, and the
+        // grid each one is drawn on.
+        href: "/admin/sections",
+        label: "Gardens & map layout",
+        icon: LayoutGrid,
+        requiredRoles: ["admin"],
       },
     ],
   },
@@ -237,28 +284,6 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
         href: "/reports",
         label: "Reports",
         icon: FileBarChart,
-        requiredRoles: ["admin"],
-      },
-      {
-        // Building the 3D map, start to finish, on one screen. It sits
-        // above the sections registry deliberately: somebody who wants
-        // "the map" wants the walkthrough, not a table of gardens, and
-        // sending them to the registry first is how the job turned into
-        // six tabs in the first place.
-        href: "/admin/map-setup",
-        label: "Set up the 3D map",
-        icon: Map,
-        requiredRoles: ["admin"],
-      },
-      {
-        // The gardens themselves, and how each one is arranged on the
-        // 3D map. Reachable only from the admin hub until now, which is
-        // two clicks past where anybody looks for it — and setting a
-        // garden's layout is a thing somebody does while looking at the
-        // map, not while spelunking a settings page.
-        href: "/admin/sections",
-        label: "Gardens & map layout",
-        icon: Boxes,
         requiredRoles: ["admin"],
       },
       {
