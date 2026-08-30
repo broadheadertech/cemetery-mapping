@@ -461,6 +461,23 @@ export default defineSchema({
      * lots actually in the garden, which is a reasonable guess and
      * always better than drawing nothing.
      */
+    /**
+     * The garden's outline on the ground.
+     *
+     * Without it the map shows lots floating in an empty field: a
+     * handful of coloured squares with nothing to say where the garden
+     * starts, where it ends, or that they belong together at all. The
+     * boundary is what makes the map read as a cemetery.
+     *
+     * Absent until somebody traces it. Deliberately NOT derived from
+     * the lots — a hull around four placed lots out of eighty is a
+     * confident drawing of the wrong shape, and the whole point of an
+     * irregular park is that its edges are not implied by its contents.
+     */
+    boundary: v.optional(
+      v.array(v.object({ lat: v.number(), lng: v.number() })),
+    ),
+    boundaryUpdatedAt: v.optional(v.number()),
     gridColumns: v.optional(v.number()),
     gridRows: v.optional(v.number()),
     /** Turf colour for the garden's pad, as `0xRRGGBB`. */

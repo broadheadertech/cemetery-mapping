@@ -11,6 +11,22 @@ import {
 import dynamic from "next/dynamic";
 import { DEFAULT_CEMETERY_BBOX, type Bbox } from "@/lib/geometry";
 import { useLotsInViewport } from "@/hooks/useLotsInViewport";
+import { useQuery } from "convex/react";
+import { makeFunctionReference } from "convex/server";
+import type { SectionOutline } from "./LeafletRenderer";
+
+/**
+ * The traced garden outlines.
+ *
+ * Read once for the whole map rather than per viewport: there are a
+ * handful of gardens, they change when an admin traces one, and
+ * re-reading them on every pan would be work for nothing.
+ */
+const listBoundariesRef = makeFunctionReference<
+  "query",
+  Record<string, never>,
+  SectionOutline[]
+>("sections:listSectionBoundaries");
 import type { LotStatus } from "@/types/lot-status";
 import { SvgRenderer } from "./SvgRenderer";
 
@@ -124,6 +140,7 @@ export function LotMap({
     bbox: effectiveBbox,
     statusFilters,
   });
+  const outlines = useQuery(listBoundariesRef, {});
 
   /*
    * Once Leaflet is up, it stays up.
@@ -197,10 +214,19 @@ export function LotMap({
   if (renderer === "leaflet") {
     return (
       <LeafletErrorBoundary fallback={svgFallback}>
-        <div className="relative">
+        {/*
+          `isolate` for the same reason the renderer inside it carries
+          one: the status overlays below sit at z-1000 so they clear
+          Leaflet's controls, and without a stacking context here that
+          number would compete in the ROOT context and win against every
+          dialog and tooltip in the app — trading the bug for its mirror
+          image.
+        */}
+        <div className="relative isolate">
           <LeafletRenderer
             bbox={effectiveBbox}
             lots={safeLots}
+            outlines={outlines ?? []}
             onLotClick={onLotClick}
             height={height}
             selectedLotId={selectedLotId}

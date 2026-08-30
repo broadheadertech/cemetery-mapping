@@ -322,7 +322,23 @@ export function LotLocationPicker({
         role="application"
         aria-label={`Click to place lot ${lotCode}. Arrow keys pan; plus and minus zoom.`}
         data-testid="lot-location-picker"
-        className="w-full overflow-hidden rounded-md border border-surface-border bg-surface-muted"
+      /*
+       * `isolate` is load-bearing, not cosmetic.
+       *
+       * Leaflet's own stylesheet puts `.leaflet-pane` at z-index 400 and
+       * its controls at 1000. Without a stacking context here those
+       * numbers compete in the ROOT context, against app chrome that
+       * sits at z-50 — so the map painted straight over any dialog,
+       * popover or tooltip portalled to <body>. Clicking a lot opened
+       * its action menu and the menu was drawn behind the map: visible
+       * above the map's top edge, gone everywhere else.
+       *
+       * Isolating contains Leaflet's internal ordering to this element,
+       * where it belongs. Raising the dialog's z-index instead would
+       * have fixed one dialog and left every other overlay to lose the
+       * same fight.
+       */
+        className="isolate w-full overflow-hidden rounded-md border border-surface-border bg-surface-muted"
         style={{ height: "60vh", minHeight: 360 }}
       />
 

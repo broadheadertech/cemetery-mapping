@@ -192,3 +192,30 @@ body {
   color: #d4bc85;
   margin-left: 7px;
 }
+
+/*
+ * Garden name, drawn in the middle of its traced outline on the
+ * cemetery map. Deliberately quiet: the outline is context for the
+ * lots, not the subject, and Leaflet's default tooltip chrome (white
+ * box, border, drop shadow, arrow) reads as a popup somebody opened
+ * rather than as a label on the ground.
+ */
+.lotmap-section-label {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: #1d5c4d;
+  font-family: var(--font-display), Georgia, serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  /* The label must never eat a click meant for a lot beneath it. */
+  pointer-events: none;
+  text-shadow:
+    0 1px 2px rgba(246, 242, 234, 0.9),
+    0 0 6px rgba(246, 242, 234, 0.8);
+}
+
+.lotmap-section-label::before {
+  display: none;
+}

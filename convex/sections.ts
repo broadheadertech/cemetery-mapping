@@ -40,6 +40,7 @@ import schema from "./schema";
 import { requireRole, type MutationCtx, type QueryCtx } from "./lib/auth";
 import { emitAudit } from "./lib/audit";
 import { ErrorCode, throwError } from "./lib/errors";
+import { isCoordInManilaSanityRange } from "./lib/geometry";
 
 type DataModel = DataModelFromSchemaDefinition<typeof schema>;
 type SectionDoc = DataModel["sections"]["document"];
@@ -98,6 +99,14 @@ export interface ListedSection {
   isRetired: boolean;
   createdAt: number;
   createdBy: SectionDoc["createdBy"];
+  /**
+   * The garden's traced outline, if somebody has traced one.
+   *
+   * Absent, not null: it distinguishes "no outline" from an empty one,
+   * and the editor keys its "remove the saved outline" control on the
+   * difference.
+   */
+  boundary?: Array<{ lat: number; lng: number }>;
   /** Columns across on the 3D map. Null when nobody has set a layout. */
   gridColumns: number | null;
   /** Rows deep on the 3D map. Null when nobody has set a layout. */
@@ -155,6 +164,9 @@ export const listSections = queryGeneric({
         createdBy: row.createdBy,
         linkedLotCount: linkedLots.length,
       };
+      if (row.boundary !== undefined) {
+        item.boundary = row.boundary;
+      }
       if (row.descriptionMarkdown !== undefined) {
         item.descriptionMarkdown = row.descriptionMarkdown;
       }
@@ -720,5 +732,164 @@ export const setSectionLayout = mutationGeneric({
     });
 
     return { sectionId: args.sectionId };
+  },
+});
+
+/**
+ * The fewest corners that enclose anything. Two points are a line.
+ */
+const MIN_BOUNDARY_POINTS = 3;
+
+/**
+ * More corners than anybody traces, and more than the map wants to draw
+ * per garden on every pan.
+ */
+const MAX_BOUNDARY_POINTS = 200;
+
+/**
+ * Trace a garden's outline on the ground.
+ *
+ * Without one the map shows lots floating in an empty field — a few
+ * coloured squares with nothing to say where the garden begins, where
+ * it ends, or that they belong together. The boundary is what makes the
+ * map read as a cemetery rather than as scattered points.
+ *
+ * Not derived from the lots on purpose. A hull drawn around four placed
+ * lots out of eighty is a confident drawing of the wrong shape, and the
+ * whole point of an irregular park is that its edges are not implied by
+ * its contents.
+ */
+export const setSectionBoundary = mutationGeneric({
+  args: {
+    sectionId: v.id("sections"),
+    boundary: v.array(v.object({ lat: v.number(), lng: v.number() })),
+  },
+  handler: async (
+    ctx: MutationCtx,
+    args: {
+      sectionId: SectionId;
+      boundary: Array<{ lat: number; lng: number }>;
+    },
+  ): Promise<{ sectionId: SectionId }> => {
+    await requireRole(ctx, ["admin"]);
+
+    const section = await ctx.db.get(args.sectionId);
+    if (section === null) {
+      throwError(ErrorCode.NOT_FOUND, "Section not found.", {
+        sectionId: args.sectionId,
+      });
+    }
+
+    if (args.boundary.length < MIN_BOUNDARY_POINTS) {
+      throwError(
+        ErrorCode.VALIDATION,
+        `A boundary needs at least ${MIN_BOUNDARY_POINTS} corners — two points are a line, not an area.`,
+        { given: args.boundary.length },
+      );
+    }
+    if (args.boundary.length > MAX_BOUNDARY_POINTS) {
+      throwError(
+        ErrorCode.VALIDATION,
+        `That is ${args.boundary.length} corners. A garden outline needs far fewer, and the map has to redraw all of them on every pan.`,
+        { given: args.boundary.length },
+      );
+    }
+    for (const p of args.boundary) {
+      // Refuses rather than clamps: a corner outside the park is a
+      // mistake somebody should see, not a point to quietly move.
+      if (!isCoordInManilaSanityRange(p)) {
+        throwError(
+          ErrorCode.VALIDATION,
+          "One of those corners is outside the cemetery's coordinate range — check the outline.",
+          { lat: p.lat, lng: p.lng },
+        );
+      }
+    }
+
+    await ctx.db.patch(args.sectionId, {
+      boundary: args.boundary,
+      boundaryUpdatedAt: Date.now(),
+    });
+
+    await emitAudit(ctx, {
+      action: "update",
+      entityType: "section",
+      entityId: args.sectionId,
+      before: { corners: section.boundary?.length ?? 0 },
+      after: { corners: args.boundary.length },
+    });
+
+    return { sectionId: args.sectionId };
+  },
+});
+
+/** Remove a traced outline, back to no claim about the garden's edges. */
+export const clearSectionBoundary = mutationGeneric({
+  args: { sectionId: v.id("sections") },
+  handler: async (
+    ctx: MutationCtx,
+    args: { sectionId: SectionId },
+  ): Promise<{ sectionId: SectionId }> => {
+    await requireRole(ctx, ["admin"]);
+
+    const section = await ctx.db.get(args.sectionId);
+    if (section === null) {
+      throwError(ErrorCode.NOT_FOUND, "Section not found.", {
+        sectionId: args.sectionId,
+      });
+    }
+    if (section.boundary === undefined) {
+      throwError(ErrorCode.VALIDATION, "This garden has no outline to remove.", {
+        sectionId: args.sectionId,
+      });
+    }
+
+    await ctx.db.patch(args.sectionId, {
+      boundary: undefined,
+      boundaryUpdatedAt: undefined,
+    });
+
+    await emitAudit(ctx, {
+      action: "update",
+      entityType: "section",
+      entityId: args.sectionId,
+      before: { corners: section.boundary?.length ?? 0 },
+      after: { corners: 0 },
+    });
+
+    return { sectionId: args.sectionId };
+  },
+});
+
+/**
+ * The garden outlines, for drawing under the lots.
+ *
+ * Its own read, and a light one: names, colours and corner lists, with
+ * none of the registry's descriptions or counts. The map asks for this
+ * on every viewport change.
+ */
+export interface SectionBoundary {
+  sectionId: SectionId;
+  name: string;
+  displayName: string;
+  tintHex: number | null;
+  boundary: Array<{ lat: number; lng: number }>;
+}
+
+export const listSectionBoundaries = queryGeneric({
+  args: {},
+  handler: async (ctx: QueryCtx): Promise<SectionBoundary[]> => {
+    await requireRole(ctx, ["admin", "office_staff", "field_worker"]);
+
+    return (await ctx.db.query("sections").collect())
+      .filter((s) => !s.isRetired && s.boundary !== undefined)
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))
+      .map((s) => ({
+        sectionId: s._id,
+        name: s.name,
+        displayName: s.displayName,
+        tintHex: s.tintHex ?? null,
+        boundary: s.boundary!,
+      }));
   },
 });
