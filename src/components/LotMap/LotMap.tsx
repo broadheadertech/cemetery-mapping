@@ -197,7 +197,15 @@ export function LotMap({
   if (renderer === "leaflet") {
     return (
       <LeafletErrorBoundary fallback={svgFallback}>
-        <div className="relative">
+        {/*
+          `isolate` for the same reason the renderer inside it carries
+          one: the status overlays below sit at z-1000 so they clear
+          Leaflet's controls, and without a stacking context here that
+          number would compete in the ROOT context and win against every
+          dialog and tooltip in the app — trading the bug for its mirror
+          image.
+        */}
+        <div className="relative isolate">
           <LeafletRenderer
             bbox={effectiveBbox}
             lots={safeLots}
