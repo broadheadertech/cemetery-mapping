@@ -28,6 +28,8 @@ async function flush(): Promise<void> {
   });
 }
 
+const clearLocationMock = vi.fn(async (_args: { lotId: string }) => null);
+
 const setLocationMock = vi.fn(
   async (_args: {
     lotId: string;
@@ -39,7 +41,10 @@ const setLocationMock = vi.fn(
 );
 
 vi.mock("convex/react", () => ({
-  useMutation: () => setLocationMock,
+  useMutation: (ref: unknown) =>
+    String((ref as { name?: string })?.name ?? "").includes("clearLotLocation")
+      ? clearLocationMock
+      : setLocationMock,
 }));
 
 vi.mock("convex/server", () => ({
@@ -103,6 +108,7 @@ let device: ReturnType<typeof fakeDevice>;
 
 beforeEach(() => {
   setLocationMock.mockClear();
+  clearLocationMock.mockClear();
   vi.useFakeTimers();
   device = fakeDevice();
   Object.defineProperty(globalThis, "navigator", {
@@ -285,5 +291,31 @@ describe("when the phone will not cooperate", () => {
     render(view());
     fireEvent.click(screen.getByTestId("gps-start"));
     expect(screen.getByTestId("gps-error")).toHaveTextContent(/https/i);
+  });
+});
+
+describe("taking a position back", () => {
+  it("offers removal only to somebody who may edit", () => {
+    render(view({ alreadyPlaced: true, canClear: false }));
+    expect(screen.queryByTestId("gps-clear")).toBeNull();
+  });
+
+  it("offers nothing to remove when the lot was never placed", () => {
+    render(view({ alreadyPlaced: false, canClear: true }));
+    expect(screen.queryByTestId("gps-clear")).toBeNull();
+  });
+
+  it("removes the position and says the lot is not surveyed", async () => {
+    // "Not surveyed" beats a coordinate nobody trusts: the map leaves
+    // the lot out and says so, rather than drawing it confidently in
+    // the wrong place.
+    render(view({ alreadyPlaced: true, canClear: true }));
+    fireEvent.click(screen.getByTestId("gps-clear"));
+    await flush();
+
+    expect(clearLocationMock).toHaveBeenCalledWith({ lotId: "lots:a" });
+    expect(screen.getByTestId("gps-cleared")).toHaveTextContent(
+      /not surveyed/i,
+    );
   });
 });

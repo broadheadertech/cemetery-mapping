@@ -304,6 +304,27 @@ export const seedDemo = internalMutationGeneric({
     ];
     const lotIdByCode = new Map<string, LotId>();
     for (const spec of lotSpecs) {
+      /*
+       * A stand-in centroid, and NOT a claim to have surveyed anything.
+       *
+       * This used to write `geometryStatus: "surveyed"` over coordinates
+       * generated from the lot's index — every lot nine metres further
+       * north than the last, cycling east in fours. That is not a
+       * cemetery; it is a staircase, and because the index runs across
+       * sections it interleaved all three gardens through each other.
+       *
+       * It went unnoticed while the map drew everything on a grid and
+       * ignored geometry. The moment the map started drawing measured
+       * positions it drew these, faithfully, and the demo park came out
+       * as a scatter of lots with three overlapping labels.
+       *
+       * Demo data is invented wholesale — the customers and payments
+       * are too — but inventing a MEASUREMENT is different in kind from
+       * inventing a name. It makes the map assert something about the
+       * ground. So these stay `placeholder`, and the map draws the
+       * arrangement, which is the honest picture of data nobody
+       * surveyed.
+       */
       const geometry = geometryAround(
         BASE_LAT + spec.i * 0.00008,
         BASE_LNG + (spec.i % 4) * 0.00008,
@@ -319,7 +340,7 @@ export const seedDemo = internalMutationGeneric({
         basePriceCents: spec.basePriceCents,
         status: spec.status,
         geometry,
-        geometryStatus: "surveyed",
+        geometryStatus: "placeholder",
         isRetired: false,
         createdAt: NOW,
         createdBy: adminId,

@@ -18,12 +18,55 @@
  *     default-icon asset resolution under bundlers.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { makeFunctionReference } from "convex/server";
 
 import { translateError } from "@/lib/errors";
+import { LotGpsCapture } from "@/components/LotGpsCapture";
+
+/**
+ * The lots already placed around this one.
+ *
+ * Placing a grave on a blank tile map is guesswork: there is nothing on
+ * screen to say which way the rows run or where the garden even starts,
+ * so the only reference is a satellite-less road layout a hundred
+ * metres away. The neighbours are the reference — put the marker at the
+ * end of the row it belongs to, not at a coordinate.
+ */
+interface NeighbourLot {
+  _id: string;
+  code: string;
+  section: string;
+  status: string;
+  geometry: { centroid: { lat: number; lng: number } } | null;
+  geometryStatus: "placeholder" | "surveyed";
+}
+
+const listInBboxRef = makeFunctionReference<
+  "query",
+  {
+    bboxMinLat: number;
+    bboxMaxLat: number;
+    bboxMinLng: number;
+    bboxMaxLng: number;
+    limit: number;
+  },
+  NeighbourLot[]
+>("lots:listInBbox");
+
+/** How far around the lot to show, in degrees. Roughly 250m. */
+const CONTEXT_SPAN = 0.00225;
+
+/** Brand palette, matching the 3D map's legend. */
+const STATUS_COLOUR: Record<string, string> = {
+  available: "#8FBF9F",
+  reserved: "#C9A96B",
+  sold: "#8C9BC4",
+  occupied: "#1D5C4D",
+  defaulted: "#C46A6A",
+};
 
 const setLotLocationRef = makeFunctionReference<
   "mutation",
@@ -54,6 +97,38 @@ export function LotLocationPicker({
   const mapRef = useRef<unknown>(null);
 
   const [point, setPoint] = useState<{ lat: number; lng: number }>(initial);
+  const [showContext, setShowContext] = useState(true);
+
+  /*
+   * A fixed window around where the lot started, NOT around the marker.
+   *
+   * Following the marker would re-query on every click and re-draw the
+   * neighbours underneath the thing being dragged, which is both
+   * distracting and pointless — 250m of context does not meaningfully
+   * change when you move a grave three metres.
+   */
+  const neighbours = useQuery(listInBboxRef, {
+    bboxMinLat: initial.lat - CONTEXT_SPAN,
+    bboxMaxLat: initial.lat + CONTEXT_SPAN,
+    bboxMinLng: initial.lng - CONTEXT_SPAN,
+    bboxMaxLng: initial.lng + CONTEXT_SPAN,
+    limit: 200,
+  });
+
+  /** Only lots somebody actually placed, and never this one. */
+  const placedNeighbours = useMemo(
+    () =>
+      (neighbours ?? []).filter(
+        (l) =>
+          l._id !== lotId &&
+          l.geometryStatus === "surveyed" &&
+          l.geometry !== null,
+      ),
+    [neighbours, lotId],
+  );
+  const neighboursRef = useRef(placedNeighbours);
+  neighboursRef.current = placedNeighbours;
+  const contextLayerRef = useRef<unknown>(null);
   const [ready, setReady] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -97,6 +172,10 @@ export function LotLocationPicker({
         setPoint({ lat, lng });
       });
 
+      // Their own layer, so they can be redrawn or hidden without
+      // touching the map or the marker being placed.
+      contextLayerRef.current = L.layerGroup().addTo(map);
+
       mapRef.current = map;
       setReady(true);
     })();
@@ -108,6 +187,46 @@ export function LotLocationPicker({
       mapRef.current = null;
     };
   }, [initial.lat, initial.lng]);
+
+  /*
+   * Paint the neighbours whenever they arrive or are toggled.
+   *
+   * A separate effect from the map bootstrap on purpose: the map is
+   * built once, and lots loading a moment later must not rebuild it.
+   */
+  useEffect(() => {
+    if (!ready) return;
+    const layer = contextLayerRef.current as {
+      clearLayers?: () => void;
+      addLayer?: (l: unknown) => void;
+    } | null;
+    if (layer === null || typeof layer.clearLayers !== "function") return;
+
+    let cancelled = false;
+    (async () => {
+      const L = await import("leaflet");
+      if (cancelled) return;
+      layer.clearLayers?.();
+      if (!showContext) return;
+
+      for (const n of neighboursRef.current) {
+        const c = n.geometry!.centroid;
+        const marker = L.circleMarker([c.lat, c.lng], {
+          radius: 5,
+          color: "#ffffff",
+          weight: 1,
+          fillColor: STATUS_COLOUR[n.status] ?? "#8C9BC4",
+          fillOpacity: 0.85,
+        });
+        marker.bindTooltip(`${n.code} · ${n.status}`, { direction: "top" });
+        layer.addLayer?.(marker);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ready, showContext, placedNeighbours]);
 
   async function handleSave(): Promise<void> {
     setSaving(true);
@@ -137,6 +256,67 @@ export function LotLocationPicker({
         )}
       </div>
 
+      {/*
+        What else is out there, and the choice to hide it.
+
+        Placing a grave on a blank tile map is guesswork — there is
+        nothing on screen to say which way the rows run. The neighbours
+        are the reference. Hiding them matters too: when the lot being
+        placed sits under a cluster of others, the marker is the thing
+        you need to see.
+      */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-surface-border bg-surface-base px-3 py-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-text-muted">
+            Nearby lots
+          </span>
+          {placedNeighbours.length === 0 ? (
+            <span
+              data-testid="picker-context-empty"
+              className="text-xs text-text-muted"
+            >
+              {neighbours === undefined
+                ? "Loading…"
+                : "None placed nearby yet — this is the first."}
+            </span>
+          ) : (
+            <span
+              data-testid="picker-context-count"
+              className="text-xs text-text-muted"
+            >
+              {placedNeighbours.length} shown
+            </span>
+          )}
+          <span className="flex flex-wrap items-center gap-2">
+            {(
+              [
+                ["available", "Available"],
+                ["reserved", "Reserved"],
+                ["sold", "Sold"],
+                ["occupied", "Occupied"],
+              ] as Array<[string, string]>
+            ).map(([key, label]) => (
+              <span key={key} className="flex items-center gap-1">
+                <span
+                  aria-hidden="true"
+                  className="inline-block h-2.5 w-2.5 rounded-full"
+                  style={{ background: STATUS_COLOUR[key] }}
+                />
+                <span className="text-[11px] text-text-muted">{label}</span>
+              </span>
+            ))}
+          </span>
+        </div>
+        <button
+          type="button"
+          data-testid="picker-context-toggle"
+          onClick={() => setShowContext((v) => !v)}
+          className="text-xs font-medium text-text-muted underline hover:text-primary"
+        >
+          {showContext ? "Hide nearby lots" : "Show nearby lots"}
+        </button>
+      </div>
+
       <div
         ref={containerRef}
         role="application"
@@ -144,6 +324,20 @@ export function LotLocationPicker({
         data-testid="lot-location-picker"
         className="w-full overflow-hidden rounded-md border border-surface-border bg-surface-muted"
         style={{ height: "60vh", minHeight: 360 }}
+      />
+
+      {/*
+        The other way to answer the same question.
+
+        This screen asks "where is this lot", and until now the only
+        answer it accepted was a click — which means being somewhere
+        else and pointing. Somebody standing AT the grave has the better
+        answer and had to go to a different page to give it.
+      */}
+      <LotGpsCapture
+        lotId={lotId}
+        lotCode={lotCode}
+        alreadyPlaced={surveyed}
       />
 
       <div className="flex flex-wrap items-center justify-between gap-3">

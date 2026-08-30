@@ -26,7 +26,11 @@ vi.mock("../../../convex/lib/audit", () => ({
 }));
 
 import { getAuthSessionId, getAuthUserId } from "@convex-dev/auth/server";
-import { setLotLocation, MAX_GPS_ACCURACY_M } from "../../../convex/lots";
+import {
+  clearLotLocation,
+  setLotLocation,
+  MAX_GPS_ACCURACY_M,
+} from "../../../convex/lots";
 import { ErrorCode } from "../../../convex/lib/errors";
 import { ConvexError, type Value } from "convex/values";
 import type { ErrorPayload } from "../../../convex/lib/errors";
@@ -127,6 +131,7 @@ function handlerOf(fn: any): (ctx: unknown, args: unknown) => Promise<any> {
 }
 
 const run = handlerOf(setLotLocation);
+const runClear = handlerOf(clearLotLocation);
 
 async function codeOf(fn: () => Promise<unknown>): Promise<string | undefined> {
   try {
@@ -282,5 +287,81 @@ describe("how rough a reading may be", () => {
     expect(
       await codeOf(() => run(ctx, { lotId: LOT_ID, lat: 51.5, lng: -0.12 })),
     ).toBe(ErrorCode.VALIDATION);
+  });
+});
+
+/**
+ * Taking a position back.
+ *
+ * There was no way to do this at all. A bad import, a mis-click, a GPS
+ * fix taken beside a wall — all permanent, because the only recourse
+ * was to place the lot somewhere else, which replaces one assertion
+ * with another rather than withdrawing the first.
+ *
+ * "Not surveyed" is a real state and a better one than a coordinate
+ * nobody trusts: the map leaves the lot out and says how many it is not
+ * showing, instead of drawing it confidently in the wrong place.
+ */
+describe("removing a position", () => {
+  it("puts the lot back to not surveyed", async () => {
+    const { ctx, patches } = makeCtx({
+      roles: ["office_staff"],
+      lot: {
+        geometryStatus: "surveyed",
+        geometrySource: "gps",
+        geometryAccuracyM: 18,
+      },
+    });
+    await runClear(ctx, { lotId: LOT_ID });
+    expect(patches[0]!.geometryStatus).toBe("placeholder");
+  });
+
+  it("clears the CLAIM as well as the status", async () => {
+    // A leftover source or accuracy would let a later reader conclude
+    // the lot had been surveyed after all.
+    const { ctx, patches } = makeCtx({
+      roles: ["office_staff"],
+      lot: {
+        geometryStatus: "surveyed",
+        geometrySource: "gps",
+        geometryAccuracyM: 18,
+        geometryCapturedAt: T0,
+      },
+    });
+    await runClear(ctx, { lotId: LOT_ID });
+    expect(patches[0]!.geometrySource).toBeUndefined();
+    expect(patches[0]!.geometryAccuracyM).toBeUndefined();
+    expect(patches[0]!.geometryCapturedAt).toBeUndefined();
+  });
+
+  it("leaves a stand-in centroid rather than nothing", async () => {
+    // Geometry is required on the document; removing it outright would
+    // break every reader that assumes it is there.
+    const { ctx, patches } = makeCtx({
+      roles: ["office_staff"],
+      lot: { geometryStatus: "surveyed", geometrySource: "clicked" },
+    });
+    await runClear(ctx, { lotId: LOT_ID });
+    expect(patches[0]!.geometry).toBeDefined();
+  });
+
+  it("refuses when there is no position to remove", async () => {
+    const { ctx } = makeCtx({ roles: ["office_staff"] });
+    expect(await codeOf(() => runClear(ctx, { lotId: LOT_ID }))).toBe(
+      ErrorCode.VALIDATION,
+    );
+  });
+
+  it("is office work, not field work", async () => {
+    // A field worker who thinks their own reading was poor can take
+    // another. Deciding the record should say "not surveyed" is a
+    // different call.
+    const { ctx } = makeCtx({
+      roles: ["field_worker"],
+      lot: { geometryStatus: "surveyed", geometrySource: "gps" },
+    });
+    expect(await codeOf(() => runClear(ctx, { lotId: LOT_ID }))).toBe(
+      ErrorCode.FORBIDDEN,
+    );
   });
 });

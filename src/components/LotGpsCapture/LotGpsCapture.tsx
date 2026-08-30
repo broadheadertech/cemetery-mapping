@@ -51,11 +51,25 @@ const setLocationRef = makeFunctionReference<
   null
 >("lots:setLotLocation");
 
+const clearLocationRef = makeFunctionReference<
+  "mutation",
+  { lotId: string },
+  null
+>("lots:clearLotLocation");
+
 export interface LotGpsCaptureProps {
   lotId: string;
   lotCode: string;
   /** True when the lot already has a position, whatever its source. */
   alreadyPlaced?: boolean;
+  /**
+   * Whether the reader may withdraw a position outright.
+   *
+   * Office work, not field work: a field worker whose own reading was
+   * poor can simply take another, but deciding the record should say
+   * "not surveyed" is a different call.
+   */
+  canClear?: boolean;
 }
 
 type Phase = "idle" | "sampling" | "done" | "saved";
@@ -64,8 +78,12 @@ export function LotGpsCapture({
   lotId,
   lotCode,
   alreadyPlaced = false,
+  canClear = false,
 }: LotGpsCaptureProps): ReactElement {
   const setLocation = useMutation(setLocationRef);
+  const clearLocation = useMutation(clearLocationRef);
+  const [clearing, setClearing] = useState(false);
+  const [cleared, setCleared] = useState(false);
 
   const [phase, setPhase] = useState<Phase>("idle");
   const [samples, setSamples] = useState<GpsSample[]>([]);
@@ -313,6 +331,48 @@ export function LotGpsCapture({
           className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
         >
           {error}
+        </p>
+      )}
+
+      {/*
+        Withdrawing a position, which nothing could do before.
+        "Not surveyed" beats a coordinate nobody trusts: the map leaves
+        the lot out and says so, rather than drawing it confidently in
+        the wrong place.
+      */}
+      {canClear && alreadyPlaced && !cleared && phase === "idle" && (
+        <div className="mt-4 border-t border-slate-200 pt-3">
+          <button
+            type="button"
+            disabled={clearing}
+            data-testid="gps-clear"
+            onClick={() => {
+              setClearing(true);
+              setError(null);
+              void clearLocation({ lotId })
+                .then(() => setCleared(true))
+                .catch((e: unknown) => setError(translateError(e).detail))
+                .finally(() => setClearing(false));
+            }}
+            className="text-xs font-medium text-slate-600 underline hover:text-slate-900 disabled:text-slate-400"
+          >
+            {clearing ? "Removing…" : "Remove this position"}
+          </button>
+          <p className="mt-1 text-[11px] text-slate-500">
+            Marks the lot not surveyed. Better than a position nobody
+            trusts — the map leaves it out and says how many it is not
+            showing.
+          </p>
+        </div>
+      )}
+
+      {cleared && (
+        <p
+          role="status"
+          data-testid="gps-cleared"
+          className="mt-4 rounded-md border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-700"
+        >
+          Position removed. This lot is not surveyed.
         </p>
       )}
 

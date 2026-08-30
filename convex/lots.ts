@@ -1786,3 +1786,68 @@ export const listSurveyedForMap = queryGeneric({
     return { lots, sections, origin };
   },
 });
+
+/**
+ * Take back a position.
+ *
+ * There was no way to do this at all. A lot could be placed by an
+ * import, a click or a phone, and once placed it was placed — a bad
+ * import, a mis-click, a GPS fix taken beside a wall, all permanent.
+ * The only recourse was to place it somewhere else, which replaces one
+ * assertion with another rather than withdrawing the first.
+ *
+ * "Not surveyed" is a real and useful state. It is what every lot
+ * starts in, it is what the map and the lot page both say plainly, and
+ * it is strictly better than a coordinate nobody trusts: the map leaves
+ * the lot out of the surveyed view and says how many it is not showing,
+ * instead of drawing it confidently in the wrong place.
+ *
+ * Office work, not field work. A field worker who thinks their own
+ * reading was poor can simply take another; withdrawing a position
+ * outright is a decision about the record.
+ */
+export const clearLotLocation = mutationGeneric({
+  args: { lotId: v.id("lots") },
+  handler: async (ctx: MutationCtx, args: { lotId: LotId }): Promise<void> => {
+    await requireRole(ctx, ["admin", "office_staff"]);
+
+    const before = await ctx.db.get(args.lotId);
+    if (before === null) {
+      throwError(ErrorCode.NOT_FOUND, "Lot not found.", { lotId: args.lotId });
+    }
+    if (before.geometryStatus !== "surveyed") {
+      throwError(
+        ErrorCode.VALIDATION,
+        "This lot has no position to remove.",
+        { lotId: args.lotId },
+      );
+    }
+
+    // Back to the same stand-in a new lot is created with, so nothing
+    // downstream has to cope with geometry being absent.
+    const geometry = getDefaultPlaceholderGeometry({
+      section: before.section,
+    });
+
+    await ctx.db.patch(args.lotId, {
+      geometry,
+      geometryStatus: "placeholder",
+      geometrySource: undefined,
+      geometryAccuracyM: undefined,
+      geometryCapturedAt: undefined,
+    });
+
+    await emitAudit(ctx, {
+      action: "update",
+      entityType: "lot",
+      entityId: args.lotId,
+      before: {
+        geometryStatus: before.geometryStatus,
+        geometrySource: before.geometrySource ?? null,
+        lat: before.geometry?.centroid.lat ?? null,
+        lng: before.geometry?.centroid.lng ?? null,
+      },
+      after: { geometryStatus: "placeholder" },
+    });
+  },
+});

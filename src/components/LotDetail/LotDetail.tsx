@@ -173,6 +173,7 @@ export function LotDetail({ detail, roles = [], onRetire }: LotDetailProps) {
         lotId={detail._id}
         lotCode={detail.code}
         alreadyPlaced={detail.geometryStatus === "surveyed"}
+        canClear={canEdit}
       />
       <ConditionLogsPanel lotId={detail._id} />
 
