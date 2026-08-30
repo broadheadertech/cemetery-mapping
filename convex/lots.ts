@@ -1209,8 +1209,21 @@ export const listForMap = queryGeneric({
       counts.set(l.section, (counts.get(l.section) ?? 0) + 1);
     }
 
+    // Lots carry the DISPLAY form of a garden's name — the seed writes
+    // `sections.name: "garden-of-peace"` alongside
+    // `lots.section: "Garden of Peace"`. Keying the lookup on `name`
+    // alone matched nothing, so every garden reported its layout as
+    // guessed and configuring one appeared to do nothing at all.
+    //
+    // Both keys, display form first, because that is what the lots
+    // actually hold and a registry entry could in principle use either.
     const registry = await ctx.db.query("sections").collect();
-    const byName = new Map(registry.filter((s) => !s.isRetired).map((s) => [s.name, s]));
+    const byName = new Map<string, (typeof registry)[number]>();
+    for (const row of registry) {
+      if (row.isRetired) continue;
+      byName.set(row.name, row);
+      byName.set(row.displayName, row);
+    }
 
     const sections: MapSection[] = [...counts.entries()].map(
       ([name, lotCount]) => {

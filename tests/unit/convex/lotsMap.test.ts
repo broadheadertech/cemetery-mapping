@@ -316,6 +316,45 @@ describe("how a garden is laid out", () => {
     expect(s.layoutIsDerived).toBe(true);
   });
 
+  it("matches a garden on its DISPLAY name, which is what lots carry", async () => {
+    // The bug this was written for. The seed writes
+    // `sections.name: "garden-of-peace"` and
+    // `lots.section: "Garden of Peace"`. Keying the lookup on `name`
+    // alone matched nothing, so every garden reported its layout as
+    // guessed and configuring one appeared to do nothing at all.
+    const { ctx } = makeCtx({
+      lots: [lot({ section: "Garden of Peace" })],
+      sections: [
+        section({
+          name: "garden-of-peace",
+          displayName: "Garden of Peace",
+          gridColumns: 6,
+          gridRows: 5,
+        }),
+      ],
+    });
+    const s = (await runMap(ctx, {})).sections[0];
+    expect(s.columns).toBe(6);
+    expect(s.rows).toBe(5);
+    expect(s.layoutIsDerived).toBe(false);
+    expect(s.displayName).toBe("Garden of Peace");
+  });
+
+  it("still matches when the registry uses the display form as its name", async () => {
+    const { ctx } = makeCtx({
+      lots: [lot({ section: "Garden of Faith" })],
+      sections: [
+        section({
+          name: "Garden of Faith",
+          displayName: "Garden of Faith",
+          gridColumns: 4,
+          gridRows: 4,
+        }),
+      ],
+    });
+    expect((await runMap(ctx, {})).sections[0].columns).toBe(4);
+  });
+
   it("ignores a retired section's configured grid", async () => {
     const { ctx } = makeCtx({
       lots: [lot()],
