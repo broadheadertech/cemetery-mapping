@@ -1523,3 +1523,165 @@ export const mapSetupProgress = queryGeneric({
     };
   },
 });
+
+/**
+ * The lots that have actually been surveyed, with their real shapes.
+ *
+ * A grid cannot draw an irregular garden honestly. Curved edges, angled
+ * rows, blocks that do not line up — every grid option still puts
+ * squares in straight lines, and a garden drawn in the wrong shape
+ * looks exactly as confident on the map as one drawn right. That is
+ * worse than not drawing it, because somebody trusts it.
+ *
+ * So this is the other path: `/admin/gps-import` already accepts
+ * `{ lotCode, polygon }` batches and flips a lot to `surveyed` with its
+ * measured footprint. The truth was importable and the map simply did
+ * not draw it.
+ *
+ * Deliberately NOT folded into `listForMap`. That query's whole point
+ * is that it ships no geometry — a polygon per lot, for two thousand
+ * lots, to draw boxes positioned on a grid. When the map is drawing the
+ * polygons they are the payload rather than waste, but the two cases
+ * are different enough to be different reads, so a gridded park never
+ * pays for geometry it does not use.
+ */
+export interface SurveyedMapLot {
+  _id: LotId;
+  code: string;
+  section: string;
+  block: string;
+  status: string;
+  type: string;
+  basePriceCents: number;
+  areaSqm: number;
+  hasPhoto: boolean;
+  /** The measured centre. */
+  lat: number;
+  lng: number;
+  /** The measured footprint. Empty when only a centre was recorded. */
+  polygon: Array<{ lat: number; lng: number }>;
+}
+
+/** How much of a garden has actually been placed. */
+export interface SurveyedMapSection {
+  name: string;
+  displayName: string;
+  sortOrder: number;
+  placedCount: number;
+  unplacedCount: number;
+  /**
+   * A few of the unplaced codes, to make the gap concrete.
+   *
+   * Capped rather than complete: a garden with 400 unplaced lots does
+   * not need to ship 400 strings to make the point, and the count above
+   * is the honest total.
+   */
+  unplacedSample: string[];
+}
+
+export interface SurveyedMapData {
+  lots: SurveyedMapLot[];
+  sections: SurveyedMapSection[];
+  /** The park's centre, for projecting everything into local metres. */
+  origin: { lat: number; lng: number } | null;
+}
+
+/** Unplaced codes shown per garden before the count has to speak for itself. */
+export const UNPLACED_SAMPLE_LIMIT = 8;
+
+export const listSurveyedForMap = queryGeneric({
+  args: {
+    sectionNames: v.optional(v.array(v.string())),
+  },
+  handler: async (
+    ctx: QueryCtx,
+    args: { sectionNames?: string[] },
+  ): Promise<SurveyedMapData> => {
+    await requireRole(ctx, ["admin", "office_staff", "field_worker"]);
+
+    const wanted =
+      args.sectionNames !== undefined && args.sectionNames.length > 0
+        ? new Set(args.sectionNames)
+        : null;
+
+    const live = (await ctx.db.query("lots").collect()).filter(
+      (l) => !l.isRetired && (wanted === null || wanted.has(l.section)),
+    );
+
+    const lots: SurveyedMapLot[] = [];
+    const placed = new Map<string, number>();
+    const unplaced = new Map<string, string[]>();
+    const unplacedTotal = new Map<string, number>();
+
+    for (const l of live) {
+      // "surveyed" is the only status that means somebody measured it.
+      // A placeholder centroid is written at lot creation and points at
+      // the middle of the park; drawing on it would scatter every
+      // unplaced lot into one heap and call it a survey.
+      const centroid = l.geometry?.centroid;
+      if (l.geometryStatus !== "surveyed" || centroid === undefined) {
+        unplacedTotal.set(l.section, (unplacedTotal.get(l.section) ?? 0) + 1);
+        const sample = unplaced.get(l.section) ?? [];
+        if (sample.length < UNPLACED_SAMPLE_LIMIT) sample.push(l.code);
+        unplaced.set(l.section, sample);
+        continue;
+      }
+      placed.set(l.section, (placed.get(l.section) ?? 0) + 1);
+      lots.push({
+        _id: l._id,
+        code: l.code,
+        section: l.section,
+        block: l.block,
+        status: l.status,
+        type: l.type,
+        basePriceCents: l.basePriceCents,
+        areaSqm: areaOf(l.dimensions),
+        hasPhoto: l.photoStorageId !== undefined,
+        lat: centroid.lat,
+        lng: centroid.lng,
+        polygon: (l.geometry?.polygon ?? []).map((p) => ({
+          lat: p.lat,
+          lng: p.lng,
+        })),
+      });
+    }
+
+    lots.sort((a, b) => a.code.localeCompare(b.code));
+
+    const registry = await ctx.db.query("sections").collect();
+    const byName = sectionsByLotName(registry);
+
+    const names = new Set<string>([
+      ...placed.keys(),
+      ...unplacedTotal.keys(),
+    ]);
+    const sections: SurveyedMapSection[] = [...names]
+      .map((name) => {
+        const row = byName.get(name);
+        return {
+          name,
+          displayName: row?.displayName ?? name,
+          sortOrder: row?.sortOrder ?? 0,
+          placedCount: placed.get(name) ?? 0,
+          unplacedCount: unplacedTotal.get(name) ?? 0,
+          unplacedSample: unplaced.get(name) ?? [],
+        };
+      })
+      .sort(
+        (a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name),
+      );
+
+    // The centre of what was actually measured, so the scene is built
+    // around real lots rather than around a park bounding box that
+    // includes ground nobody has surveyed.
+    const origin =
+      lots.length === 0
+        ? null
+        : {
+            lat: lots.reduce((n, l) => n + l.lat, 0) / lots.length,
+            lng: lots.reduce((n, l) => n + l.lng, 0) / lots.length,
+          };
+
+    return { lots, sections, origin };
+  },
+});

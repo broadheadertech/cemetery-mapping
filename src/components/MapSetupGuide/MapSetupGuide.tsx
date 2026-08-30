@@ -159,6 +159,21 @@ export function MapSetupGuide(): ReactElement {
           ? "partial"
           : "todo";
   const step4: StepState = totals.lotCount > 0 ? "done" : "todo";
+  /*
+   * Placing lots is not optional for an irregular park — it is the only
+   * thing that draws it truthfully — but it genuinely is for a park of
+   * neat rectangles, where the grid is already right. So it reports
+   * progress rather than nagging: "optional" until somebody starts,
+   * then a real count once they have.
+   */
+  const step6: StepState =
+    totals.lotCount === 0
+      ? "todo"
+      : totals.surveyedCount === 0
+        ? "optional"
+        : totals.surveyedCount >= totals.lotCount
+          ? "done"
+          : "partial";
   const step5: StepState =
     totals.lotCount === 0
       ? "todo"
@@ -399,20 +414,42 @@ export function MapSetupGuide(): ReactElement {
       {/* ---- 6 ------------------------------------------------------ */}
       <Step
         n={6}
-        state="optional"
+        state={step6}
         title="Place the lots on the ground"
-        blurb="Real coordinates, clicked onto a map. The 3D view does not need them — until a lot has one it simply says “not surveyed” rather than printing a position nobody measured."
+        blurb="Where each lot actually is. A garden that is a neat rectangle does not need this — the grid already draws it right. A garden with curved edges, angled rows, or blocks that do not line up does, because no grid can draw that honestly."
       >
         {totals.lotCount === 0 ? (
           <Waiting>Add lots first.</Waiting>
         ) : (
-          <p
-            data-testid="map-setup-surveyed"
-            className="text-sm text-text-muted"
-          >
-            {totals.surveyedCount} of {totals.lotCount} lots have a measured
-            position. Open a lot and choose <em>Location</em> to place it.
-          </p>
+          <>
+            <p
+              data-testid="map-setup-surveyed"
+              className="text-sm text-text-muted"
+            >
+              {totals.surveyedCount} of {totals.lotCount} lots have a
+              measured position.
+              {totals.surveyedCount > 0 && (
+                <>
+                  {" "}
+                  The 3D map draws those where they were measured, and
+                  says how many it is not showing.
+                </>
+              )}
+            </p>
+            {/*
+              An irregular garden drawn as a rectangle looks exactly as
+              confident as one drawn right, so somebody has to be told
+              which they are looking at before they trust it.
+            */}
+            <p className="mt-2 text-sm text-text-muted">
+              A survey file places hundreds at once. One at a time is a
+              click on a map, from the lot&rsquo;s own page.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Jump href="/admin/gps-import">Import a survey file</Jump>
+              <Jump href="/lots">Place one from the lot list</Jump>
+            </div>
+          </>
         )}
       </Step>
     </div>

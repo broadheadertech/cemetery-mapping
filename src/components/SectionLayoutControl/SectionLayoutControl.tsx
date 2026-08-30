@@ -73,8 +73,8 @@ export function SectionLayoutControl({
         className="text-xs font-medium text-slate-600 underline hover:text-slate-900"
       >
         {configured
-          ? `Map layout: ${gridColumns} × ${gridRows}`
-          : "Map layout: not set"}
+          ? `Shape on the map: ${gridColumns} across × ${gridRows} deep`
+          : "Shape on the map: not set"}
       </button>
 
       {!configured && (
@@ -89,10 +89,15 @@ export function SectionLayoutControl({
 
       {open && (
         <div className="mt-2 space-y-2 rounded-md border border-slate-200 bg-slate-50 p-3">
+          <p className="text-[11px] leading-snug text-slate-600">
+            How many lots stand side by side, and how many rows the
+            garden runs back. That is the shape the 3D map draws it in —
+            nothing else about the lots changes.
+          </p>
           <div className="flex flex-wrap items-end gap-2">
             <label className="flex flex-col gap-1">
               <span className="text-xs font-medium text-slate-700">
-                Columns across
+                Lots side by side
               </span>
               <input
                 value={cols}
@@ -131,6 +136,43 @@ export function SectionLayoutControl({
               {busy ? "Saving…" : "Save"}
             </button>
           </div>
+
+          {/*
+            The numbers as a picture.
+
+            "Six columns by five rows" is a sentence somebody has to
+            translate before they can tell whether it matches the garden
+            they are standing in. The squares are the same information
+            with nothing to translate — and getting this wrong is
+            invisible on the 3D map, because a garden drawn in the wrong
+            shape looks exactly as confident as one drawn right.
+          */}
+          {valid && (
+            <div data-testid="section-layout-preview" className="space-y-1.5">
+              <div
+                className="grid w-fit gap-[3px]"
+                style={{
+                  gridTemplateColumns: `repeat(${c}, minmax(0, 1fr))`,
+                }}
+                aria-hidden="true"
+              >
+                {Array.from({ length: cells }, (_, i) => (
+                  <span
+                    key={i}
+                    className={
+                      i < lotCount
+                        ? "h-3 w-3 rounded-[2px] bg-[#1D5C4D]"
+                        : "h-3 w-3 rounded-[2px] border border-dashed border-slate-300"
+                    }
+                  />
+                ))}
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Each square is a lot, filling left to right, front to
+                back, in code order. Dashed squares are empty ground.
+              </p>
+            </div>
+          )}
 
           {/* What the numbers mean for this garden, before committing. */}
           {valid && (

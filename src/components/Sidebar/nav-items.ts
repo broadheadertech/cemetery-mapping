@@ -142,9 +142,10 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
       },
       {
         // The gardens registry underneath it — names, order, and the
-        // grid each one is drawn on.
+        // shape each one is drawn in. Labelled "map layout" until
+        // somebody asked what a map layout was, which is the answer.
         href: "/admin/sections",
-        label: "Gardens & map layout",
+        label: "Gardens",
         icon: LayoutGrid,
         requiredRoles: ["admin"],
       },

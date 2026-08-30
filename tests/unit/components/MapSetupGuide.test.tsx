@@ -166,9 +166,10 @@ describe("what each step says", () => {
     );
   });
 
-  it("keeps step 6 optional however little is surveyed", () => {
-    // The 3D map does not need coordinates. Showing this as outstanding
-    // work would push somebody into a survey they do not need.
+  it("leaves step 6 optional for a park that has not started it", () => {
+    // A garden of neat rectangles genuinely does not need coordinates —
+    // the grid already draws it right. Nagging would push somebody into
+    // a survey they do not need.
     useQueryMock.mockReturnValue(
       progress([sec({ lotCount: 28, surveyedCount: 0 })]),
     );
@@ -177,6 +178,37 @@ describe("what each step says", () => {
     expect(screen.getByTestId("map-setup-surveyed")).toHaveTextContent(
       "0 of 28",
     );
+  });
+
+  it("tracks step 6 as real progress once a survey has begun", () => {
+    // An irregular park cannot be drawn honestly any other way, so once
+    // somebody starts placing lots the count has to be visible — a
+    // half-placed park is the state that misleads.
+    useQueryMock.mockReturnValue(
+      progress([sec({ lotCount: 28, surveyedCount: 12 })]),
+    );
+    render(<MapSetupGuide />);
+    expect(state(6)).toBe("partial");
+    expect(screen.getByTestId("map-setup-surveyed")).toHaveTextContent(
+      "12 of 28",
+    );
+  });
+
+  it("marks step 6 done when every lot is placed", () => {
+    useQueryMock.mockReturnValue(
+      progress([sec({ lotCount: 28, surveyedCount: 28 })]),
+    );
+    render(<MapSetupGuide />);
+    expect(state(6)).toBe("done");
+  });
+
+  it("offers the bulk survey import, not only one lot at a time", () => {
+    // Placing two thousand lots by hand is not a plan.
+    useQueryMock.mockReturnValue(progress([sec({ lotCount: 28 })]));
+    render(<MapSetupGuide />);
+    expect(
+      screen.getByRole("link", { name: /import a survey file/i }),
+    ).toHaveAttribute("href", "/admin/gps-import");
   });
 });
 

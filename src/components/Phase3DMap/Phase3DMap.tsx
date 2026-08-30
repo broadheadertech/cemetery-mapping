@@ -21,6 +21,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useQuery } from "convex/react";
 import { makeFunctionReference } from "convex/server";
+
+import {
+  bearingOf,
+  decideMode,
+  footprintOf,
+  projectToScene,
+  type MapMode,
+} from "@/lib/mapSurvey";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
@@ -73,6 +81,55 @@ const listForMapRef = makeFunctionReference<
   { sectionNames?: string[] },
   MapData
 >("lots:listForMap");
+
+/**
+ * The measured park.
+ *
+ * A grid cannot draw an irregular garden honestly — curved edges,
+ * angled rows, blocks that do not line up. Every arrangement of squares
+ * still puts them in straight lines, and a garden drawn in the wrong
+ * shape looks exactly as confident as one drawn right.
+ *
+ * So when lots have been surveyed, the scene is built from where they
+ * actually are. A separate read from `listForMap` on purpose: that
+ * query ships no geometry, and a park still working off a grid should
+ * not pay for polygons it will not draw.
+ */
+const listSurveyedRef = makeFunctionReference<
+  "query",
+  { sectionNames?: string[] },
+  SurveyedMapData
+>("lots:listSurveyedForMap");
+
+interface SurveyedLotRow {
+  _id: string;
+  code: string;
+  section: string;
+  block: string;
+  status: string;
+  type: string;
+  basePriceCents: number;
+  areaSqm: number;
+  hasPhoto: boolean;
+  lat: number;
+  lng: number;
+  polygon: Array<{ lat: number; lng: number }>;
+}
+
+interface SurveyedSectionRow {
+  name: string;
+  displayName: string;
+  sortOrder: number;
+  placedCount: number;
+  unplacedCount: number;
+  unplacedSample: string[];
+}
+
+interface SurveyedMapData {
+  lots: SurveyedLotRow[];
+  sections: SurveyedSectionRow[];
+  origin: { lat: number; lng: number } | null;
+}
 
 /** One lot's detail, read only when somebody clicks it. */
 const lotDetailRef = makeFunctionReference<
@@ -336,6 +393,54 @@ export default function Phase3DMap({
       mapQuery.sections.some((sec) => sec.layoutIsDerived),
     [mapQuery],
   );
+  /**
+   * The measured park, and which view it can honestly support.
+   *
+   * The rule is deliberately blunt: if anything at all has been
+   * surveyed, that is the truth and the map opens on it. An arrangement
+   * is a stand-in, and a stand-in should not beat a measurement on
+   * volume. A park mid-rollout keeps the arrangement available, and the
+   * gardens the survey cannot draw are named rather than quietly
+   * absent.
+   */
+  const surveyQuery = useQuery(listSurveyedRef, isPublic ? "skip" : {});
+  const [preferredMode, setPreferredMode] = useState<MapMode | undefined>(
+    undefined,
+  );
+  const modeDecision = useMemo(
+    () =>
+      surveyQuery === undefined
+        ? null
+        : decideMode(surveyQuery.sections, preferredMode),
+    [surveyQuery, preferredMode],
+  );
+  const surveyMode = modeDecision?.mode === "survey";
+
+  /**
+   * Every surveyed lot, already projected into scene metres.
+   *
+   * Done here rather than in the scene effect so the arithmetic is
+   * plain React state that can be reasoned about, and so the effect
+   * keeps to building meshes.
+   */
+  const placements = useMemo(() => {
+    if (surveyQuery === undefined || surveyQuery.origin === null) return null;
+    const origin = surveyQuery.origin;
+    return surveyQuery.lots.map((l) => {
+      const at = projectToScene({ lat: l.lat, lng: l.lng }, origin);
+      const foot = footprintOf(l.polygon, origin);
+      return {
+        lot: l,
+        x: at.x,
+        z: at.z,
+        // A surveyed lot is rarely square to north. Drawing it as
+        // though it were is the visible half of "this is not a survey".
+        rotY: foot === null ? 0 : -bearingOf(foot),
+        measuredShape: foot !== null,
+      };
+    });
+  }, [surveyQuery]);
+
   // Rebuild the scene only when the meaningful lot set changes (ids +
   // statuses), not on every query echo.
   const sceneSignature = useMemo(() => {
@@ -348,6 +453,11 @@ export default function Phase3DMap({
   }, [realLots]);
   const realDataRef = useRef<RealLotRow[] | null>(realLots);
   realDataRef.current = realLots;
+  type Placement = NonNullable<typeof placements>[number];
+  const placementsRef = useRef<Placement[] | null>(placements);
+  placementsRef.current = placements;
+  const surveyModeRef = useRef<boolean>(surveyMode);
+  surveyModeRef.current = surveyMode;
   /**
    * What the scene actually draws.
    *
@@ -366,6 +476,18 @@ export default function Phase3DMap({
   const sectionSignature = parcelSections
     .map((x) => `${x.id}:${x.cols}x${x.rows}`)
     .join("|");
+
+  // A survey is a different scene from an arrangement, and moving one
+  // lot moves one box — so the placement set is part of the rebuild key.
+  const surveySignature = useMemo(
+    () =>
+      surveyMode && placements !== null
+        ? `survey:${placements
+            .map((p) => `${p.lot._id}:${p.x.toFixed(2)}:${p.z.toFixed(2)}`)
+            .join("|")}`
+        : "arrangement",
+    [surveyMode, placements],
+  );
 
   // ---- Build the scene when live data resolves (rebuild on change). ----
   useEffect(() => {
@@ -486,28 +608,78 @@ export default function Phase3DMap({
       w: number;
       d: number;
       cx: number;
+      /** Depth-wise centre. Always 0 on an arrangement; real on a survey. */
+      cz: number;
     }
     const SECTIONS: SectionDef[] = sectionsRef.current.map((s) => ({
       ...s,
       w: 0,
       d: 0,
       cx: 0,
+      cz: 0,
     }));
     const cellW = 3.0;
     const cellD = 3.6;
     const avenue = 6;
 
-    SECTIONS.forEach((s) => {
-      s.w = s.cols * cellW;
-      s.d = s.rows * cellD;
-    });
-    const totalW =
-      SECTIONS.reduce((a, s) => a + s.w, 0) + avenue * (SECTIONS.length - 1);
-    let cursorX = -totalW / 2;
-    SECTIONS.forEach((s) => {
-      s.cx = cursorX + s.w / 2;
-      cursorX += s.w + avenue;
-    });
+    /*
+     * Where each garden sits.
+     *
+     * On an arrangement, nowhere in particular: the gardens are laid
+     * out side by side with an avenue between them, because a grid has
+     * no real position to draw from.
+     *
+     * On a survey they have one. Each garden's pad is the bounding box
+     * of its own measured lots, so gardens sit at their true distance
+     * and bearing from each other — which is the entire reason for
+     * surveying an irregular park in the first place.
+     */
+    const surveying = surveyModeRef.current;
+    const placed = placementsRef.current ?? [];
+    let totalW = 0;
+
+    if (surveying) {
+      SECTIONS.forEach((s) => {
+        const mine = placed.filter((p) => p.lot.section === s.name);
+        if (mine.length === 0) {
+          s.w = 0;
+          s.d = 0;
+          s.cx = 0;
+          return;
+        }
+        const xs = mine.map((p) => p.x);
+        const zs = mine.map((p) => p.z);
+        // Padded by a lot's own size so the pad does not slice through
+        // the plots on its edges.
+        const pad = 3;
+        s.w = Math.max(...xs) - Math.min(...xs) + pad * 2;
+        s.d = Math.max(...zs) - Math.min(...zs) + pad * 2;
+        s.cx = (Math.max(...xs) + Math.min(...xs)) / 2;
+        s.cz = (Math.max(...zs) + Math.min(...zs)) / 2;
+      });
+      const allX = placed.map((p) => p.x);
+      const allZ = placed.map((p) => p.z);
+      totalW =
+        placed.length === 0
+          ? 40
+          : Math.max(
+              Math.max(...allX) - Math.min(...allX),
+              Math.max(...allZ) - Math.min(...allZ),
+            ) + 12;
+    } else {
+      SECTIONS.forEach((s) => {
+        s.w = s.cols * cellW;
+        s.d = s.rows * cellD;
+        s.cz = 0;
+      });
+      totalW =
+        SECTIONS.reduce((a, s) => a + s.w, 0) + avenue * (SECTIONS.length - 1);
+      let cursorX = -totalW / 2;
+      SECTIONS.forEach((s) => {
+        s.cx = cursorX + s.w / 2;
+        cursorX += s.w + avenue;
+      });
+    }
 
     // Frame the whole parcel, whatever its width. Derived rather
     // than fixed so adding gardens does not crop the view.
@@ -527,11 +699,16 @@ export default function Phase3DMap({
     let gid = 0;
 
     SECTIONS.forEach((sec) => {
+      // On a survey, a garden with nothing placed has no position to
+      // draw a pad at. It is reported in the banner instead of being
+      // invented somewhere.
+      if (surveying && sec.w === 0) return;
+
       const pad = new THREE.Mesh(
         new THREE.BoxGeometry(sec.w + 2.4, 0.06, sec.d + 2.4),
         new THREE.MeshStandardMaterial({ color: sec.tint, roughness: 1 }),
       );
-      pad.position.set(sec.cx, 0.04, 0);
+      pad.position.set(sec.cx, 0.04, sec.cz);
       pad.receiveShadow = true;
       scene.add(pad);
 
@@ -546,7 +723,7 @@ export default function Phase3DMap({
         ] as Array<[number, number, number, number]>
       ).forEach(([x, z, w, d]) => {
         const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.4, d), curbMat);
-        m.position.set(sec.cx + x, 0.2, z);
+        m.position.set(sec.cx + x, 0.2, sec.cz + z);
         m.castShadow = true;
         m.receiveShadow = true;
         scene.add(m);
@@ -561,12 +738,70 @@ export default function Phase3DMap({
             .sort((a, b) => a.code.localeCompare(b.code))
         : [];
 
+      /*
+       * One entry per box to draw.
+       *
+       * The two modes differ ONLY here. On an arrangement a cell is a
+       * grid position and the lot is whichever one falls there in code
+       * order; on a survey a cell is a measured position and the lot is
+       * the one measured there. Everything below — the concrete, the
+       * headstones, the click targets — is identical, because a lot is
+       * a lot however the map worked out where to put it.
+       */
+      interface Cell {
+        r: number;
+        c: number;
+        x: number;
+        z: number;
+        rotY: number;
+        real: RealLotRow | null;
+      }
       const x0 = -sec.w / 2 + cellW / 2;
       const z0 = -sec.d / 2 + cellD / 2;
-      for (let r = 0; r < sec.rows; r++) {
-        for (let c = 0; c < sec.cols; c++) {
+      const cells: Cell[] = [];
+      if (surveying) {
+        placed
+          .filter((p) => p.lot.section === sec.name)
+          .forEach((p, i) => {
+            cells.push({
+              r: Math.floor(i / Math.max(1, sec.cols)),
+              c: i % Math.max(1, sec.cols),
+              x: p.x,
+              z: p.z,
+              rotY: p.rotY,
+              real: {
+                _id: p.lot._id,
+                code: p.lot.code,
+                section: p.lot.section,
+                block: p.lot.block,
+                status: p.lot.status,
+                type: p.lot.type,
+                basePriceCents: p.lot.basePriceCents,
+                areaSqm: p.lot.areaSqm,
+                hasPhoto: p.lot.hasPhoto,
+              },
+            });
+          });
+      } else {
+        for (let r = 0; r < sec.rows; r++) {
+          for (let c = 0; c < sec.cols; c++) {
+            cells.push({
+              r,
+              c,
+              x: sec.cx + x0 + c * cellW,
+              z: sec.cz + z0 + r * cellD,
+              rotY: 0,
+              real: realMode ? (secReal[r * sec.cols + c] ?? null) : null,
+            });
+          }
+        }
+      }
+
+      {
+        for (const cell of cells) {
+          const r = cell.r;
+          const c = cell.c;
           gid++;
-          const cellIndex = r * sec.cols + c;
 
           // Resolve the lot for this cell — real or procedural-demo.
           let st: LotStatus;
@@ -577,8 +812,8 @@ export default function Phase3DMap({
           let block: string;
           let occupant: string | null;
           if (realMode) {
-            const rl = secReal[cellIndex];
-            if (rl === undefined) continue; // no real lot here — leave empty
+            const rl = cell.real;
+            if (rl === null) continue; // no real lot here — leave empty
             st = to3DStatus(rl.status);
             type = to3DType(rl.type);
             code = rl.code;
@@ -606,10 +841,9 @@ export default function Phase3DMap({
           }
           const cfg = STATUS[st];
           const isMaus = type === "mausoleum";
-          const x = sec.cx + x0 + c * cellW;
-          const z = z0 + r * cellD;
           const g = new THREE.Group();
-          g.position.set(x, 0, z);
+          g.position.set(cell.x, 0, cell.z);
+          g.rotation.y = cell.rotY;
 
           const baseW = type === "family" ? 2.6 : 2.1;
           const baseD = type === "family" ? 3.0 : 2.6;
@@ -718,9 +952,16 @@ export default function Phase3DMap({
       labelEls.push({ el, sec });
     });
 
-    // Avenues + promenade.
+    /*
+     * Avenues + promenade.
+     *
+     * Arrangement only. These are drawn BETWEEN the synthetic garden
+     * blocks, at spacings the arrangement invented — on a survey there
+     * is no such gap to fill, and laying tarmac across measured ground
+     * would put a road where the park has none.
+     */
     const parcelD = Math.max(...SECTIONS.map((s) => s.d)) + 5;
-    for (let i = 0; i < SECTIONS.length - 1; i++) {
+    for (let i = 0; !surveying && i < SECTIONS.length - 1; i++) {
       const a = SECTIONS[i];
       const b = SECTIONS[i + 1];
       if (!a || !b) continue;
@@ -733,13 +974,15 @@ export default function Phase3DMap({
       p.receiveShadow = true;
       scene.add(p);
     }
-    const prom = new THREE.Mesh(
-      new THREE.BoxGeometry(totalW + 10, 0.08, 2),
-      pathMat,
-    );
-    prom.position.set(0, 0.05, parcelD / 2 + 2.5);
-    prom.receiveShadow = true;
-    scene.add(prom);
+    if (!surveying) {
+      const prom = new THREE.Mesh(
+        new THREE.BoxGeometry(totalW + 10, 0.08, 2),
+        pathMat,
+      );
+      prom.position.set(0, 0.05, parcelD / 2 + 2.5);
+      prom.receiveShadow = true;
+      scene.add(prom);
+    }
 
     // Trees along the parcel edges.
     const tree = (x: number, z: number) => {
@@ -1020,7 +1263,7 @@ export default function Phase3DMap({
       }
       apiRef.current = null;
     };
-  }, [sceneSignature, sectionSignature]);
+  }, [sceneSignature, sectionSignature, surveySignature]);
 
   // Bridge filter state → scene. Also re-applied after a rebuild
   // (sceneSignature change) so the active filter survives a data refresh.
@@ -1167,7 +1410,79 @@ export default function Phase3DMap({
 
       {/* Rail */}
       <aside className="overflow-y-auto border-t border-surface-border p-6 lg:border-l lg:border-t-0">
-        {anyDerivedLayout && !isDemo && !isPublic && (
+        {/*
+          Which of the two things you are looking at.
+          
+          The single most important line on this screen. A survey and an
+          arrangement render identically — same boxes, same colours,
+          same confidence — and only one of them is where the graves
+          actually are.
+        */}
+        {modeDecision !== null && !isDemo && !isPublic && (
+          <div
+            data-testid="map-mode-bar"
+            className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-surface-border bg-surface-muted px-3 py-2"
+          >
+            <p className="text-[11px] leading-snug text-text-muted">
+              {surveyMode ? (
+                <>
+                  <strong className="font-semibold text-text-default">
+                    Surveyed positions.
+                  </strong>{" "}
+                  {modeDecision.placedCount} lot
+                  {modeDecision.placedCount === 1 ? "" : "s"} drawn where
+                  they were measured.
+                  {modeDecision.unplacedCount > 0 && (
+                    <>
+                      {" "}
+                      {modeDecision.unplacedCount} more have no measured
+                      position and are not shown.
+                    </>
+                  )}
+                </>
+              ) : (
+                <>
+                  <strong className="font-semibold text-text-default">
+                    Arrangement, not a survey.
+                  </strong>{" "}
+                  Lots are drawn in code order on each garden&rsquo;s
+                  grid, so a lot&rsquo;s place here is its place in that
+                  order — not where it stands in the ground.
+                </>
+              )}
+              {modeDecision.missingSections.length > 0 && surveyMode && (
+                <>
+                  {" "}
+                  Nothing is placed yet in{" "}
+                  <span
+                    data-testid="map-missing-sections"
+                    className="text-text-default"
+                  >
+                    {modeDecision.missingSections.join(", ")}
+                  </span>
+                  , so {modeDecision.missingSections.length === 1
+                    ? "it is"
+                    : "they are"}{" "}
+                  absent from this view.
+                </>
+              )}
+            </p>
+            {modeDecision.canSwitch && (
+              <button
+                type="button"
+                data-testid="map-mode-toggle"
+                onClick={() =>
+                  setPreferredMode(surveyMode ? "arrangement" : "survey")
+                }
+                className="shrink-0 rounded-md border border-surface-border bg-surface-base px-3 py-1.5 text-xs font-semibold text-text-default hover:border-accent-gold hover:text-primary"
+              >
+                {surveyMode ? "Show the arrangement" : "Show surveyed positions"}
+              </button>
+            )}
+          </div>
+        )}
+
+        {anyDerivedLayout && !isDemo && !isPublic && !surveyMode && (
           <div
             data-testid="derived-layout-note"
             className="mb-4 rounded-md border border-surface-border bg-surface-muted px-3 py-2 text-[11px] leading-snug text-text-muted"

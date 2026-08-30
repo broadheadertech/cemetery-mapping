@@ -29,6 +29,8 @@ import {
   deriveGrid,
   getMapLotDetail,
   listForMap,
+  listSurveyedForMap,
+  UNPLACED_SAMPLE_LIMIT,
 } from "../../../convex/lots";
 import { ErrorCode } from "../../../convex/lib/errors";
 import { ConvexError, type Value } from "convex/values";
@@ -122,6 +124,7 @@ function handlerOf(fn: any): (ctx: unknown, args: unknown) => Promise<any> {
 
 const runMap = handlerOf(listForMap);
 const runDetail = handlerOf(getMapLotDetail);
+const runSurveyed = handlerOf(listSurveyedForMap);
 
 async function codeOf(fn: () => Promise<unknown>): Promise<string | undefined> {
   try {
@@ -453,5 +456,167 @@ describe("who may read the map", () => {
   it("refuses a customer", async () => {
     const { ctx } = makeCtx({ roles: ["customer"], lots: [lot()] });
     expect(await codeOf(() => runMap(ctx, {}))).toBe(ErrorCode.FORBIDDEN);
+  });
+});
+
+// --- drawing the park as it actually is --------------------------------
+
+/**
+ * A grid cannot draw an irregular garden honestly, so the other path is
+ * the measured one: `/admin/gps-import` writes real polygons and flips
+ * a lot to `surveyed`.
+ *
+ * The failure that matters here is not an exception. Every lot is
+ * created with a PLACEHOLDER centroid pointing at the middle of the
+ * park. Drawing on those would pile the whole cemetery into one heap at
+ * the centre and present it as a survey — tidy, confident, and wrong.
+ */
+describe("the surveyed map", () => {
+  it("draws only lots somebody actually measured", () => {
+    return (async () => {
+      const { ctx } = makeCtx({
+        lots: [
+          lot({ geometryStatus: "surveyed" }),
+          lot({ _id: "lots:b", code: "A-02" }), // placeholder
+        ],
+      });
+      const data = await runSurveyed(ctx, {});
+      expect(data.lots).toHaveLength(1);
+      expect(data.lots[0].code).toBe("A-01");
+    })();
+  });
+
+  it("ships the measured outline, not just the centre", async () => {
+    // The outline is what makes an angled or irregular garden draw
+    // true. A centre alone can only ever produce a north-aligned box.
+    const { ctx } = makeCtx({
+      lots: [lot({ geometryStatus: "surveyed" })],
+    });
+    const data = await runSurveyed(ctx, {});
+    expect(data.lots[0].polygon).toHaveLength(4);
+    expect(data.lots[0].lat).toBe(16.3);
+    expect(data.lots[0].lng).toBe(120.3);
+  });
+
+  it("counts what is placed and what is not, per garden", async () => {
+    const { ctx } = makeCtx({
+      lots: [
+        lot({ geometryStatus: "surveyed" }),
+        lot({ _id: "lots:b", code: "A-02" }),
+        lot({ _id: "lots:c", code: "A-03" }),
+      ],
+      sections: [section()],
+    });
+    const s = (await runSurveyed(ctx, {})).sections[0];
+    expect(s.placedCount).toBe(1);
+    expect(s.unplacedCount).toBe(2);
+    expect(s.displayName).toBe("Garden of Faith");
+  });
+
+  it("NAMES a few unplaced lots, and caps the list", async () => {
+    // "412 lots unplaced" is a number somebody skims. Four codes they
+    // can go and look for is a number they act on — and shipping all
+    // 412 strings to make that point would be the same waste the light
+    // list exists to avoid.
+    const many = Array.from({ length: 20 }, (_, i) =>
+      lot({ _id: `lots:u${i}`, code: `U-${i}` }),
+    );
+    const { ctx } = makeCtx({ lots: many });
+    const s = (await runSurveyed(ctx, {})).sections[0];
+    expect(s.unplacedCount).toBe(20);
+    expect(s.unplacedSample).toHaveLength(UNPLACED_SAMPLE_LIMIT);
+  });
+
+  it("centres the scene on what was measured", async () => {
+    // Not on the park bounding box: that includes ground nobody has
+    // surveyed, and would push the drawn lots off to one side.
+    const { ctx } = makeCtx({
+      lots: [
+        lot({ geometryStatus: "surveyed" }),
+        lot({
+          _id: "lots:b",
+          code: "A-02",
+          geometryStatus: "surveyed",
+          geometry: {
+            centroid: { lat: 16.4, lng: 120.4 },
+            polygon: [],
+            bboxMinLat: 16.4,
+            bboxMaxLat: 16.4,
+            bboxMinLng: 120.4,
+            bboxMaxLng: 120.4,
+          },
+        }),
+      ],
+    });
+    const { origin } = await runSurveyed(ctx, {});
+    expect(origin?.lat).toBeCloseTo(16.35, 6);
+    expect(origin?.lng).toBeCloseTo(120.35, 6);
+  });
+
+  it("has no origin when nothing is measured", async () => {
+    const { ctx } = makeCtx({ lots: [lot()] });
+    const data = await runSurveyed(ctx, {});
+    expect(data.origin).toBeNull();
+    expect(data.lots).toEqual([]);
+  });
+
+  it("still reports gardens that have nothing placed at all", async () => {
+    // Otherwise the survey view is silently short a whole garden and
+    // looks complete.
+    const { ctx } = makeCtx({
+      lots: [lot({ section: "Garden of Hope" })],
+      sections: [section({ name: "Garden of Hope", displayName: "Garden of Hope" })],
+    });
+    const s = (await runSurveyed(ctx, {})).sections[0];
+    expect(s.placedCount).toBe(0);
+    expect(s.unplacedCount).toBe(1);
+  });
+
+  it("treats a surveyed status with no centroid as unplaced", async () => {
+    // A half-written geometry record should not become a lot drawn at
+    // the scene origin.
+    const { ctx } = makeCtx({
+      lots: [lot({ geometryStatus: "surveyed", geometry: undefined })],
+    });
+    const data = await runSurveyed(ctx, {});
+    expect(data.lots).toEqual([]);
+    expect(data.sections[0].unplacedCount).toBe(1);
+  });
+
+  it("leaves out retired lots", async () => {
+    const { ctx } = makeCtx({
+      lots: [
+        lot({ geometryStatus: "surveyed" }),
+        lot({ _id: "lots:x", code: "A-99", geometryStatus: "surveyed", isRetired: true }),
+      ],
+    });
+    expect((await runSurveyed(ctx, {})).lots).toHaveLength(1);
+  });
+
+  it("draws only the gardens asked for", async () => {
+    const { ctx } = makeCtx({
+      lots: [
+        lot({ geometryStatus: "surveyed" }),
+        lot({ _id: "lots:b", code: "B-01", section: "Garden of Hope", geometryStatus: "surveyed" }),
+      ],
+    });
+    const data = await runSurveyed(ctx, { sectionNames: ["Garden of Hope"] });
+    expect(data.lots).toHaveLength(1);
+    expect(data.lots[0].section).toBe("Garden of Hope");
+  });
+
+  it("lets a field worker read it", async () => {
+    // Finding a grave on the ground is their job more than anybody's,
+    // and this is the view that says where it actually is.
+    const { ctx } = makeCtx({
+      roles: ["field_worker"],
+      lots: [lot({ geometryStatus: "surveyed" })],
+    });
+    expect((await runSurveyed(ctx, {})).lots).toHaveLength(1);
+  });
+
+  it("refuses a customer", async () => {
+    const { ctx } = makeCtx({ roles: ["customer"] });
+    expect(await codeOf(() => runSurveyed(ctx, {}))).toBe(ErrorCode.FORBIDDEN);
   });
 });
