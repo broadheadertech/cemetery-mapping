@@ -140,3 +140,60 @@ describe("Sidebar component", () => {
     expect(screen.queryByText("Admin")).not.toBeInTheDocument();
   });
 });
+
+/**
+ * The Map group.
+ *
+ * Before it existed, `/map` and `/phase-3d` were in no menu at all —
+ * `/phase-3d` is where staff LAND after signing in and there was still
+ * no way to navigate back to it — while the two screens that build the
+ * map sat under Admin between Reports and Payment plans. Looking at the
+ * park and arranging the park are the same job an hour apart.
+ */
+describe("the Map group", () => {
+  const group = NAV_GROUPS.find((g) => g.label === "Map");
+
+  it("exists, and holds every map screen", () => {
+    expect(group).toBeDefined();
+    expect(group?.items.map((i) => i.href)).toEqual([
+      "/map",
+      "/phase-3d",
+      "/admin/map-setup",
+      "/admin/sections",
+    ]);
+  });
+
+  it("runs look-at-it before build-it", () => {
+    // The order is the point of grouping them. Setup above the map
+    // would greet a field worker with an admin screen they cannot open.
+    const hrefs = group?.items.map((i) => i.href) ?? [];
+    expect(hrefs.indexOf("/phase-3d")).toBeLessThan(
+      hrefs.indexOf("/admin/map-setup"),
+    );
+  });
+
+  it("lets field workers see the map itself and nothing more", () => {
+    // Finding a grave on the ground is their job more than anybody's.
+    // Arranging gardens is not.
+    const visible = filterNavGroups(NAV_GROUPS, ["field_worker"]).find(
+      (g) => g.label === "Map",
+    );
+    expect(visible?.items.map((i) => i.href)).toEqual(["/map", "/phase-3d"]);
+  });
+
+  it("leaves no map screen behind in another group", () => {
+    // The failure that would otherwise be invisible: an entry moved by
+    // copy rather than by cut, listed twice in two places.
+    const elsewhere = NAV_GROUPS.filter((g) => g.label !== "Map").flatMap(
+      (g) => g.items.map((i) => i.href),
+    );
+    for (const href of ["/map", "/phase-3d", "/admin/map-setup", "/admin/sections"]) {
+      expect(elsewhere).not.toContain(href);
+    }
+  });
+
+  it("gives every item in the app a unique destination", () => {
+    const hrefs = NAV_ITEMS.map((i) => i.href);
+    expect(new Set(hrefs).size).toBe(hrefs.length);
+  });
+});
