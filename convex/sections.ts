@@ -98,6 +98,10 @@ export interface ListedSection {
   isRetired: boolean;
   createdAt: number;
   createdBy: SectionDoc["createdBy"];
+  /** Columns across on the 3D map. Null when nobody has set a layout. */
+  gridColumns: number | null;
+  /** Rows deep on the 3D map. Null when nobody has set a layout. */
+  gridRows: number | null;
   linkedLotCount: number;
 }
 
@@ -142,6 +146,11 @@ export const listSections = queryGeneric({
         sortOrder: row.sortOrder,
         kind: row.kind,
         isRetired: row.isRetired,
+        // The 3D map's arrangement for this garden. Null when nobody
+        // has set one — the map then derives a square-ish grid and says
+        // it did.
+        gridColumns: row.gridColumns ?? null,
+        gridRows: row.gridRows ?? null,
         createdAt: row.createdAt,
         createdBy: row.createdBy,
         linkedLotCount: linkedLots.length,

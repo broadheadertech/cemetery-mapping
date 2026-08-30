@@ -42,6 +42,7 @@ import {
   type SectionKind,
 } from "@/components/SectionForm";
 import { translateError } from "@/lib/errors";
+import { SectionLayoutControl } from "@/components/SectionLayoutControl";
 
 /** Mirror of the row shape returned by `api.sections.listSections`. */
 interface SectionRow {
@@ -55,6 +56,9 @@ interface SectionRow {
   isRetired: boolean;
   createdAt: number;
   linkedLotCount: number;
+  /** How the 3D map arranges this garden. Null when nobody has set it. */
+  gridColumns: number | null;
+  gridRows: number | null;
 }
 
 const listSectionsRef = makeFunctionReference<
@@ -262,6 +266,19 @@ export default function AdminSectionsPage() {
                           {s.descriptionMarkdown}
                         </div>
                       )}
+                    {/* How the 3D map draws this garden. Sits with the
+                        name rather than in its own column because it is
+                        edited rarely and read alongside the garden it
+                        belongs to. */}
+                    {!s.isRetired && (
+                      <SectionLayoutControl
+                        sectionId={s._id}
+                        displayName={s.displayName}
+                        gridColumns={s.gridColumns}
+                        gridRows={s.gridRows}
+                        lotCount={s.linkedLotCount}
+                      />
+                    )}
                   </td>
                   <td className="px-4 py-3 font-mono text-xs text-slate-600">
                     {s.name}
