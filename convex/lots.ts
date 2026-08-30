@@ -66,6 +66,7 @@ type DataModel = DataModelFromSchemaDefinition<typeof schema>;
 type LotDoc = DataModel["lots"]["document"];
 type LotId = LotDoc["_id"];
 type StorageId = NonNullable<LotDoc["photoStorageId"]>;
+type SectionId = DataModel["sections"]["document"]["_id"];
 
 /**
  * Lot status validator — matches the schema's `v.union(v.literal(...))`
@@ -1162,6 +1163,33 @@ export function areaOf(dimensions: {
 }
 
 /**
+ * A garden registry keyed by every name a lot might store.
+ *
+ * A section is written down twice: `name` is a kebab-case identifier
+ * ("garden-of-peace") and `displayName` is the label ("Garden of
+ * Peace"). A lot stores neither — the lot form resolves the chosen
+ * section and writes its DISPLAY name into the `section` column.
+ *
+ * Keying on `name` alone matched nothing for any real lot, so every
+ * garden reported its layout as guessed and configuring one appeared to
+ * save and then change nothing, forever, with no error to explain it.
+ *
+ * Both keys, and one function, so the map and the setup walkthrough
+ * cannot drift apart on what counts as a match.
+ */
+export function sectionsByLotName<
+  T extends { name: string; displayName: string; isRetired: boolean },
+>(registry: readonly T[]): Map<string, T> {
+  const byName = new Map<string, T>();
+  for (const row of registry) {
+    if (row.isRetired) continue;
+    byName.set(row.name, row);
+    byName.set(row.displayName, row);
+  }
+  return byName;
+}
+
+/**
  * The map's data, in one read.
  *
  * Field workers may run it — the map is how somebody finds a grave on
@@ -1209,21 +1237,8 @@ export const listForMap = queryGeneric({
       counts.set(l.section, (counts.get(l.section) ?? 0) + 1);
     }
 
-    // Lots carry the DISPLAY form of a garden's name — the seed writes
-    // `sections.name: "garden-of-peace"` alongside
-    // `lots.section: "Garden of Peace"`. Keying the lookup on `name`
-    // alone matched nothing, so every garden reported its layout as
-    // guessed and configuring one appeared to do nothing at all.
-    //
-    // Both keys, display form first, because that is what the lots
-    // actually hold and a registry entry could in principle use either.
     const registry = await ctx.db.query("sections").collect();
-    const byName = new Map<string, (typeof registry)[number]>();
-    for (const row of registry) {
-      if (row.isRetired) continue;
-      byName.set(row.name, row);
-      byName.set(row.displayName, row);
-    }
+    const byName = sectionsByLotName(registry);
 
     const sections: MapSection[] = [...counts.entries()].map(
       ([name, lotCount]) => {
@@ -1381,5 +1396,130 @@ export const setLotPhoto = mutationGeneric({
     void auth;
 
     return { lotId: args.lotId };
+  },
+});
+
+/**
+ * Where each garden stands in getting itself onto the 3D map.
+ *
+ * Building the map means six things across six screens — create the
+ * garden, set its arrangement, add its lots, look at it, photograph
+ * them, place them. Doing that by tab-hopping means holding in your
+ * head which gardens you have already done, which is exactly the thing
+ * a computer should be holding for you.
+ *
+ * So: one row per garden, counted rather than claimed. Every garden the
+ * registry knows about, INCLUDING the empty ones — those are the whole
+ * point, since a garden with no lots is invisible to `listForMap` and
+ * would otherwise be the one you forget.
+ */
+export interface MapSetupSection {
+  sectionId: SectionId;
+  name: string;
+  displayName: string;
+  sortOrder: number;
+  kind: string;
+  /** The configured arrangement, or null when nobody has set one. */
+  gridColumns: number | null;
+  gridRows: number | null;
+  /** Live lots in this garden. */
+  lotCount: number;
+  /** How many of them carry a photograph. */
+  photoCount: number;
+  /** How many have a measured position rather than a placeholder. */
+  surveyedCount: number;
+}
+
+export interface MapSetupProgress {
+  sections: MapSetupSection[];
+  /**
+   * Lots whose `section` string matches no garden in the registry.
+   *
+   * These are real lots that the map cannot draw and cannot lay out —
+   * usually a legacy import written before the garden existed, or a
+   * renamed garden that left its lots behind. Silence here would be the
+   * worst outcome: the lots exist, the map omits them, and nothing
+   * anywhere says why.
+   */
+  orphanSections: Array<{ section: string; lotCount: number }>;
+  totals: {
+    sectionCount: number;
+    laidOutCount: number;
+    lotCount: number;
+    photoCount: number;
+    surveyedCount: number;
+  };
+}
+
+export const mapSetupProgress = queryGeneric({
+  args: {},
+  handler: async (ctx: QueryCtx): Promise<MapSetupProgress> => {
+    await requireRole(ctx, ["admin"]);
+
+    const registry = (await ctx.db.query("sections").collect()).filter(
+      (s) => !s.isRetired,
+    );
+    const lots = (await ctx.db.query("lots").collect()).filter(
+      (l) => !l.isRetired,
+    );
+
+    // Tally against the same matcher the map draws with, so a garden
+    // reported as ready here is a garden the map can actually place.
+    const byName = sectionsByLotName(registry);
+    const tally = new Map<
+      string,
+      { lots: number; photos: number; surveyed: number }
+    >();
+    const orphans = new Map<string, number>();
+
+    for (const l of lots) {
+      const row = byName.get(l.section);
+      if (row === undefined) {
+        orphans.set(l.section, (orphans.get(l.section) ?? 0) + 1);
+        continue;
+      }
+      const key = row.name;
+      const t = tally.get(key) ?? { lots: 0, photos: 0, surveyed: 0 };
+      t.lots += 1;
+      if (l.photoStorageId !== undefined) t.photos += 1;
+      if (l.geometryStatus === "surveyed") t.surveyed += 1;
+      tally.set(key, t);
+    }
+
+    const sections: MapSetupSection[] = registry
+      .map((s) => {
+        const t = tally.get(s.name) ?? { lots: 0, photos: 0, surveyed: 0 };
+        return {
+          sectionId: s._id,
+          name: s.name,
+          displayName: s.displayName,
+          sortOrder: s.sortOrder,
+          kind: s.kind,
+          gridColumns: s.gridColumns ?? null,
+          gridRows: s.gridRows ?? null,
+          lotCount: t.lots,
+          photoCount: t.photos,
+          surveyedCount: t.surveyed,
+        };
+      })
+      .sort(
+        (a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name),
+      );
+
+    return {
+      sections,
+      orphanSections: [...orphans.entries()]
+        .map(([section, lotCount]) => ({ section, lotCount }))
+        .sort((a, b) => b.lotCount - a.lotCount),
+      totals: {
+        sectionCount: sections.length,
+        laidOutCount: sections.filter(
+          (s) => s.gridColumns !== null && s.gridRows !== null,
+        ).length,
+        lotCount: sections.reduce((n, s) => n + s.lotCount, 0),
+        photoCount: sections.reduce((n, s) => n + s.photoCount, 0),
+        surveyedCount: sections.reduce((n, s) => n + s.surveyedCount, 0),
+      },
+    };
   },
 });
