@@ -27,7 +27,7 @@ import { translateError } from "@/lib/errors";
 
 interface CeremonyDetailShape {
   ceremonyId: string;
-  kind: "consecration" | "interment" | "memorial_anniversary";
+  kind: "consecration" | "interment" | "memorial_anniversary" | "wake";
   status: "scheduled" | "completed" | "cancelled";
   contractId: string;
   contractNumber: string;

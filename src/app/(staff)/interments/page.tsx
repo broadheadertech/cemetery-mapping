@@ -14,8 +14,19 @@
  * /interments/new helper, which prompts the operator to pick a lot.
  *
  * Auth: the (staff) layout's `requireAuth` gate (Story 1.1 + 1.2)
- * protects this route. Per-role enforcement (`office_staff` / `admin`)
- * lives inside the underlying Convex queries.
+ * protects this route, and `listInterments` enforces
+ * `["admin", "office_staff"]` server-side.
+ *
+ * That server check is real but it is not what keeps this page
+ * standing: a rejected `useQuery` THROWS during render, so a field
+ * worker who typed this URL got a FORBIDDEN crash screen rather than a
+ * quiet empty list. `src/middleware.ts` now redirects them to
+ * /dashboard before the page mounts.
+ *
+ * @gated-route-only — `/interments` is listed by exact path in
+ * `isOfficeRoute`. Only this index and `/interments/quick` are gated;
+ * the rest of the family (`/today`, `/[intermentId]`, `/calendar`) is
+ * where field workers actually work, and their queries admit them.
  */
 
 import Link from "next/link";
@@ -84,6 +95,13 @@ export default function IntermentsListPage() {
             className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
             Calendar view
+          </Link>
+          <Link
+            href="/interments/quick"
+            data-testid="interments-quick-link"
+            className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Family at the desk
           </Link>
           <Link
             href="/interments/new"

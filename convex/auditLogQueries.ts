@@ -39,6 +39,7 @@
 
 import {
   type DataModelFromSchemaDefinition,
+  internalQueryGeneric,
   paginationOptsValidator,
   queryGeneric,
 } from "convex/server";
@@ -161,6 +162,58 @@ async function projectRow(
  * Admin-only — `requireRole(ctx, ["admin"])` is the first awaited
  * statement (lint-enforced).
  */
+/**
+ * The audit page itself, with no role check.
+ *
+ * Split out for the scheduled export renderer, which carries no user
+ * identity — see the note on `computeSalesByDimension` in
+ * `convex/reports.ts`. The admin gate lives on `exports:requestExport`.
+ */
+async function computeRecentAuditPage(
+  ctx: QueryCtx,
+  args: {
+    paginationOpts: { numItems: number; cursor: string | null };
+    from?: number;
+    to?: number;
+  },
+): Promise<AuditLogPage> {
+  const opts = clampPaginationOpts(args.paginationOpts);
+  const hasFrom = typeof args.from === "number" && Number.isFinite(args.from);
+  const hasTo = typeof args.to === "number" && Number.isFinite(args.to);
+  const result = await ctx.db
+    .query("auditLog")
+    .withIndex("by_timestamp", (q) => {
+      // The Convex `IndexRangeBuilder` narrows the builder type
+      // after each call — `.gte()` returns an
+      // `UpperBoundIndexRangeBuilder` that only has `.lt` / `.lte`.
+      // So we branch on all four shapes explicitly rather than
+      // re-assigning the (now-narrower) builder back to a wider
+      // variable.
+      if (hasFrom && hasTo) {
+        return q
+          .gte("timestamp", args.from as number)
+          .lte("timestamp", args.to as number);
+      }
+      if (hasFrom) {
+        return q.gte("timestamp", args.from as number);
+      }
+      if (hasTo) {
+        return q.lte("timestamp", args.to as number);
+      }
+      return q;
+    })
+    .order("desc")
+    .paginate(opts);
+  const page = await Promise.all(
+    result.page.map((row) => projectRow(ctx, row)),
+  );
+  return {
+    page,
+    isDone: result.isDone,
+    continueCursor: result.continueCursor,
+  };
+}
+
 export const listRecent = queryGeneric({
   args: {
     paginationOpts: paginationOptsValidator,
@@ -186,42 +239,38 @@ export const listRecent = queryGeneric({
     },
   ): Promise<AuditLogPage> => {
     await requireRole(ctx, ["admin"]);
-    const opts = clampPaginationOpts(args.paginationOpts);
-    const hasFrom = typeof args.from === "number" && Number.isFinite(args.from);
-    const hasTo = typeof args.to === "number" && Number.isFinite(args.to);
-    const result = await ctx.db
-      .query("auditLog")
-      .withIndex("by_timestamp", (q) => {
-        // The Convex `IndexRangeBuilder` narrows the builder type
-        // after each call — `.gte()` returns an
-        // `UpperBoundIndexRangeBuilder` that only has `.lt` / `.lte`.
-        // So we branch on all four shapes explicitly rather than
-        // re-assigning the (now-narrower) builder back to a wider
-        // variable.
-        if (hasFrom && hasTo) {
-          return q
-            .gte("timestamp", args.from as number)
-            .lte("timestamp", args.to as number);
-        }
-        if (hasFrom) {
-          return q.gte("timestamp", args.from as number);
-        }
-        if (hasTo) {
-          return q.lte("timestamp", args.to as number);
-        }
-        return q;
-      })
-      .order("desc")
-      .paginate(opts);
-    const page = await Promise.all(
-      result.page.map((row) => projectRow(ctx, row)),
-    );
-    return {
-      page,
-      isDone: result.isDone,
-      continueCursor: result.continueCursor,
-    };
+    return computeRecentAuditPage(ctx, args);
   },
+});
+
+/**
+ * Internal read for the scheduled export renderer. Unreachable from a
+ * client.
+ */
+export const internal_recentAuditPageForExport = internalQueryGeneric({
+  args: {
+    paginationOpts: paginationOptsValidator,
+    /**
+     * Optional inclusive lower bound (epoch ms). When supplied, the
+     * scan restricts to rows whose `timestamp >= from`. Story 6.4's
+     * audit_log export adapter forwards admin-supplied `args.from`
+     * here so a "Jan–Mar audit log" export honors the date range
+     * rather than silently delivering the most-recent rows.
+     */
+    from: v.optional(v.number()),
+    /**
+     * Optional inclusive upper bound (epoch ms). Pairs with `from`.
+     */
+    to: v.optional(v.number()),
+  },
+  handler: async (
+    ctx: QueryCtx,
+    args: {
+      paginationOpts: { numItems: number; cursor: string | null };
+      from?: number;
+      to?: number;
+    },
+  ): Promise<AuditLogPage> => computeRecentAuditPage(ctx, args),
 });
 
 /**

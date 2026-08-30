@@ -131,6 +131,16 @@ export default defineSchema({
       // the enquiry arriving is not an operator action and emits
       // nothing.
       v.literal("enquiry"),
+      // Payment plans and promotions — an admin changing what the
+      // cemetery charges is exactly the kind of event the log exists
+      // for, and "which plan was this sold under" has to be answerable
+      // long after the plan is retired.
+      v.literal("payment_plan"),
+      v.literal("promo"),
+      // Installing or re-placing the certificate blank changes every
+      // certificate the park issues from then on.
+      v.literal("certificate_template"),
+      v.literal("sales_agent"),
     ),
     entityId: v.string(),
     before: v.optional(v.any()),
@@ -269,6 +279,21 @@ export default defineSchema({
       widthM: v.number(),
       depthM: v.number(),
     }),
+    /**
+     * How much this lot holds, in HALF-BODY UNITS: a body is 2, a set
+     * of bones is 1, so a standard two-body lot is 4.
+     *
+     * Two sets of bones occupy the space of one body — bone transfer is
+     * ordinary practice, and a family plot that has taken a reduction
+     * has room again. Counting in halves as integers keeps floating
+     * point out of the question "will my mother fit beside my father";
+     * see `convex/lib/lotCapacity.ts`.
+     *
+     * Optional because it defaults from the lot's type, and because
+     * every lot that existed before this rule has no value. Absent
+     * means "use the type's default" — never "unlimited".
+     */
+    capacityUnits: v.optional(v.number()),
     basePriceCents: v.number(),
     status: v.union(
       v.literal("available"),
@@ -291,6 +316,20 @@ export default defineSchema({
       v.literal("placeholder"),
       v.literal("surveyed"),
     ),
+    /**
+     * A photograph of the lot as it stands.
+     *
+     * This is what "surveyed" means in practice for a park this size: a
+     * picture somebody took, not a polygon somebody paid a surveyor
+     * for. It is what a family recognises and what an office needs to
+     * settle "is this the one by the tree" — and `geometry.polygon` has
+     * never answered that question for anybody.
+     *
+     * Distinct from `lotConditionLogs.photoStorageId`, which is a dated
+     * observation of a problem. This is the representative image.
+     */
+    photoStorageId: v.optional(v.id("_storage")),
+    photoUpdatedAt: v.optional(v.number()),
     isRetired: v.boolean(),
     createdAt: v.number(),
     createdBy: v.id("users"),
@@ -368,6 +407,25 @@ export default defineSchema({
       v.literal("columbarium"),
     ),
     descriptionMarkdown: v.optional(v.string()),
+    /**
+     * How this garden is laid out on the 3D map: a grid, columns across
+     * by rows deep.
+     *
+     * The map is a VISUAL REPRESENTATION, not a survey. Lots fill the
+     * grid in code order; a lot's position here is its place in that
+     * order, not where it stands in the ground. That is a deliberate
+     * choice — a schematic that loads instantly is more useful at a
+     * counter than a surveyed model that does not.
+     *
+     * Optional so every section that existed before this stays valid.
+     * Absent means the map falls back to a square-ish grid sized to the
+     * lots actually in the garden, which is a reasonable guess and
+     * always better than drawing nothing.
+     */
+    gridColumns: v.optional(v.number()),
+    gridRows: v.optional(v.number()),
+    /** Turf colour for the garden's pad, as `0xRRGGBB`. */
+    tintHex: v.optional(v.number()),
     geometryBoundsBox: v.optional(
       v.object({
         minLat: v.number(),
@@ -932,7 +990,30 @@ export default defineSchema({
   occupants: defineTable({
     lotId: v.id("lots"),
     name: v.string(),
+    /**
+     * Whether this is a body or a set of transferred bones. Drives how
+     * much of the lot's capacity the occupant consumes — see
+     * `convex/lib/lotCapacity.ts`.
+     *
+     * Optional because records predating the capacity rule do not say.
+     * Those count as a BODY: guessing high costs a correction at the
+     * counter, guessing low promises a family space that is not there.
+     */
+    intermentKind: v.optional(
+      v.union(v.literal("body"), v.literal("bones")),
+    ),
     dateOfInterment: v.optional(v.number()),
+    /**
+     * When the person died — a different fact from when they are
+     * buried, and the one the family arrives holding.
+     *
+     * It comes off the death certificate, it is what the office is told
+     * first at the desk, and it is what the burial date has to be at or
+     * after. Optional because it is unknown for most legacy records and
+     * for a set of transferred bones, and because a record that omits it
+     * is still a true record.
+     */
+    dateOfDeath: v.optional(v.number()),
     relationshipToOwner: v.string(),
     notes: v.optional(v.string()),
     createdAt: v.number(),
@@ -1118,6 +1199,49 @@ export default defineSchema({
     basePriceCents: v.optional(v.number()),
     discountCents: v.optional(v.number()),
     discountReason: v.optional(v.string()),
+    /**
+     * Which offer this was sold under.
+     *
+     * Recorded so the question "how many lots did the All Souls promo
+     * actually move" has an answer that is not a guess. Optional
+     * throughout: every contract written before payment plans existed
+     * has neither, and a sale can still be priced by hand.
+     *
+     * `promoCode` is denormalised on purpose. A promotion can be
+     * renamed or retired, and the contract must go on saying what the
+     * family was actually quoted.
+     */
+    paymentPlanId: v.optional(v.id("paymentPlans")),
+    promoId: v.optional(v.id("promos")),
+    promoCode: v.optional(v.string()),
+    /**
+     * Who sold it, and on what terms.
+     *
+     * `commissionPercent` and `commissionCents` are FROZEN at the sale.
+     * Deriving them at read time from the agent's current rate would
+     * silently rewrite what an agent was promised last year every time
+     * the park adjusts its rates — and an agent's income is not a
+     * figure that should move on its own.
+     *
+     * `commissionPaidOutAt` marks it settled. Whether it is DUE is
+     * derived from collections against the contract; see
+     * `convex/lib/commission.ts`.
+     */
+    salesAgentId: v.optional(v.id("salesAgents")),
+    commissionPercent: v.optional(v.number()),
+    commissionCents: v.optional(v.number()),
+    /**
+     * The enquiry this sale came from, when the desk recorded one.
+     *
+     * Optional and filled in by hand, which is the whole caveat on
+     * every conversion figure derived from it: a sale nobody linked
+     * looks exactly like an enquiry that went nowhere. The analytics
+     * says so rather than reporting the rate as a truth.
+     */
+    enquiryId: v.optional(v.id("enquiries")),
+    commissionPaidOutAt: v.optional(v.number()),
+    commissionPaidOutByUserId: v.optional(v.id("users")),
+    commissionPayoutNote: v.optional(v.string()),
     // Story 3.8 (FR25) — perpetual care fee addon.
     //
     // Phase 1 scope per the §10 Q7-pending interpretation: a single
@@ -1270,6 +1394,7 @@ export default defineSchema({
     .index("by_customer", ["customerId"])
     .index("by_state", ["state"])
     .index("by_contractNumber", ["contractNumber"])
+    .index("by_enquiry", ["enquiryId"])
     // Story 2.9 — AR aging rollup needs to find every contract bound to
     // an estate quickly. The index pairs `familyEstateId` with `state`
     // so the aging recompute can filter to active / in-default rows in
@@ -1727,6 +1852,11 @@ export default defineSchema({
       v.literal("consecration"),
       v.literal("interment"),
       v.literal("memorial_anniversary"),
+      // The vigil before burial. Usually the longest time a family
+      // spends on the grounds, and it competes for the chapel with
+      // everything else — so it belongs in the conflict-checked
+      // calendar rather than in a notebook behind the desk.
+      v.literal("wake"),
     ),
     contractId: v.id("contracts"),
     // Story 2.9 forward-compat: stored as a string today; once 2.9
@@ -2838,7 +2968,339 @@ export default defineSchema({
   appSettings: defineTable({
     key: v.literal("singleton"),
     salesAgentTrackingEnabled: v.optional(v.boolean()),
+    /**
+     * Share of a contract that must be paid before an interment may be
+     * scheduled on its lot. 50 by default.
+     *
+     * A commercial lever, so it is a setting rather than a constant —
+     * the cemetery will want to move it without a deployment. Zero means
+     * no condition, which is a legitimate choice and simply switches the
+     * check off. See `convex/lib/intermentEligibility.ts`.
+     */
+    intermentPaymentThresholdPercent: v.optional(v.number()),
+    /**
+     * Ceiling on total relief in a quote, as a share of the lot's list
+     * price. 50 by default.
+     *
+     * A backstop, not a policy: plan discounts, promotions and a desk
+     * discount compound, and three modest ones can pass a ceiling none
+     * of them would alone. The cap applies to the TOTAL and is reported
+     * in the quote when it bites, so nobody sells a lot at a figure
+     * they did not intend. See `convex/lib/pricing.ts`.
+     */
+    maxDiscountPercent: v.optional(v.number()),
+    /**
+     * The park's standard commission rate. No default — a park that has
+     * set none owes nothing until somebody decides what the rate is,
+     * which is safer than a number appearing out of the code.
+     */
+    defaultCommissionPercent: v.optional(v.number()),
+    /**
+     * Share of a contract that must be COLLECTED before a commission is
+     * payable. 20 by default.
+     *
+     * This is the risk lever, not the price lever. Paying at signing
+     * means paying commission on money that may never arrive: an
+     * instalment contract that defaults in month three has cost the
+     * park a commission and left it holding a lot to sell again. Zero
+     * means pay at signing, which is a legitimate choice a park should
+     * have to make rather than fall into.
+     */
+    commissionEarnedAtPercent: v.optional(v.number()),
   }).index("by_key", ["key"]),
+
+  /**
+   * Sales agents — records, not logins.
+   *
+   * An agent here is a name a sale is credited to, so the park can
+   * answer "who sold this" and "what do we owe". They have no account
+   * and see nothing; if that changes, this table gains a `userId` and
+   * the role list gains a member, and neither is assumed now.
+   *
+   * Field notes:
+   *   - `commissionPercent` — this agent's own rate, when it differs
+   *     from the park's. Absent means the park default applies.
+   *   - `fullNameLowercased` — denormalised for the same reason
+   *     `customers` carries one: Convex indexes stored fields only, and
+   *     the desk needs to find an agent by typing part of a name.
+   *   - `isRetired` — soft delete, always. Contracts reference agents,
+   *     and a contract has to go on saying who sold it long after the
+   *     agent left.
+   */
+  salesAgents: defineTable({
+    fullName: v.string(),
+    fullNameLowercased: v.string(),
+    code: v.optional(v.string()),
+    phone: v.optional(v.string()),
+    email: v.optional(v.string()),
+    commissionPercent: v.optional(v.number()),
+    notes: v.optional(v.string()),
+    /**
+     * The park itself, standing in for a sale nobody sold.
+     *
+     * Every sale is attributed to somebody: a named agent, or the
+     * platform. There is no such thing as an unattributed sale, so
+     * "sales by agent" adds up to sales, and a gap in the report means
+     * a gap in the data rather than a category nobody named.
+     *
+     * It earns nothing — the park cannot owe itself a commission — and
+     * it cannot be retired or given a rate. Those are refused rather
+     * than clamped, because a house agent quietly carrying 40% would
+     * have the park reporting money it owes to nobody.
+     */
+    isSystem: v.optional(v.boolean()),
+    isRetired: v.boolean(),
+    createdAt: v.number(),
+    createdByUserId: v.id("users"),
+    updatedAt: v.number(),
+    updatedByUserId: v.optional(v.id("users")),
+  })
+    .index("by_isSystem", ["isSystem"])
+    .index("by_fullName_lowercased", ["fullNameLowercased"])
+    .index("by_code", ["code"])
+    .index("by_isRetired", ["isRetired"]),
+
+  /**
+   * Payment plans — the ways a lot may be bought.
+   *
+   * Before this table the terms were retyped at every sale: an operator
+   * entered a price, a discount, a reason, a down payment, a term and a
+   * monthly amount, freehand, per family. The cemetery had no way to
+   * say "cash is ten per cent off and there are three instalment
+   * options" other than telling people and hoping.
+   *
+   * A plan is the cemetery's offer, named. `convex/lib/pricing.ts`
+   * turns one into a figure; the sale mutations still receive explicit
+   * centavo amounts and re-validate them, so a plan is a way to fill
+   * the form correctly rather than a new trusted path into the money.
+   *
+   * Field notes:
+   *   - `kind` — matches `contracts.kind`. A plan produces one or the
+   *     other; there is no plan that is both.
+   *   - `discountPercent` — relief for choosing this plan. The cash
+   *     discount is the usual case.
+   *   - `downPaymentPercent` / `termMonths` — instalment only. Both are
+   *     required for an instalment plan to quote; the pricing module
+   *     warns by name when one is missing rather than letting the
+   *     operator meet a raw rejection at submit.
+   *   - `surchargePercent` — instalment only, and normally absent. What
+   *     the park adds for carrying the balance. Applied AFTER relief.
+   *   - `appliesToLotTypes` — empty means every type, which is what a
+   *     form produces when nobody ticks anything.
+   *   - `isDefault` — the plan the sale form opens on. At most one per
+   *     `kind`; the mutation clears the previous holder rather than
+   *     trusting the caller to.
+   *   - `isRetired` — soft delete. A retired plan disappears from the
+   *     form but stays readable, because contracts reference it and a
+   *     contract must still be able to say what it was sold under.
+   */
+  /**
+   * The blank certificate the park had designed, plus where each detail
+   * goes on it.
+   *
+   * The cemetery uploads its OWN document — letterhead, border, seal,
+   * signature blocks, and whatever wording its lawyer approved. Nothing
+   * here composes a certificate from scratch; guessing the legal text of
+   * a document a family frames and may one day take to a court is not
+   * this system's business.
+   *
+   * Field notes:
+   *   - `storageId` — the blank, as uploaded. A PDF stays vector; a PNG
+   *     or JPEG is drawn as a full-page image.
+   *   - `pageWidthPt` / `pageHeightPt` — the page the placements were
+   *     made against, read from the file at upload. Kept so a later
+   *     re-upload at a different size can be detected rather than
+   *     silently shifting every field.
+   *   - `fields[].xFrac` / `yFrac` — FRACTIONS of the page, 0–1, not
+   *     points. The admin places fields on a preview of whatever size
+   *     the browser rendered; fractions survive that, survive a
+   *     re-upload at a different DPI, and survive A4-vs-Letter.
+   *   - `yFrac` is measured from the TOP, because that is how a person
+   *     looking at a page thinks. PDF's own origin is bottom-left; the
+   *     flip happens in one place, in `convex/lib/certificate.ts`.
+   *   - `isActive` — one template is in use at a time. Superseded ones
+   *     are kept: a certificate issued last year was issued against the
+   *     template of last year, and the record should be able to say so.
+   */
+  certificateTemplates: defineTable({
+    name: v.string(),
+    storageId: v.id("_storage"),
+    mimeType: v.string(),
+    fileName: v.optional(v.string()),
+    pageWidthPt: v.number(),
+    pageHeightPt: v.number(),
+    fields: v.array(
+      v.object({
+        key: v.string(),
+        xFrac: v.number(),
+        yFrac: v.number(),
+        fontSize: v.number(),
+        align: v.union(
+          v.literal("left"),
+          v.literal("center"),
+          v.literal("right"),
+        ),
+        maxWidthFrac: v.optional(v.number()),
+      }),
+    ),
+    isActive: v.boolean(),
+    createdAt: v.number(),
+    createdByUserId: v.id("users"),
+    updatedAt: v.number(),
+    updatedByUserId: v.optional(v.id("users")),
+  })
+    .index("by_isActive", ["isActive"])
+    .index("by_createdAt", ["createdAt"]),
+
+  /**
+   * The certificate numbering sequence.
+   *
+   * A single row. Exists because the serial has to be PRINTED on the
+   * document, which means it must be assigned before the PDF is
+   * rendered — and counting existing rows at that moment would hand the
+   * same number to two families issuing at once. A counter row is
+   * read-modify-written inside one mutation, and Convex's transaction
+   * layer makes that safe.
+   *
+   * Deliberately NOT `receiptCounter`. That sequence is BIR-registered,
+   * audited, and monotonic for reasons that have nothing to do with
+   * certificates; consuming an official serial for a document the BIR
+   * never asked about would be a finding. A gap in THIS sequence — a
+   * render that failed after the number was taken — is a curiosity.
+   */
+  certificateCounter: defineTable({
+    key: v.literal("singleton"),
+    lastSerial: v.number(),
+  }).index("by_key", ["key"]),
+
+  /**
+   * A certificate of ownership, issued against a fully-paid contract.
+   *
+   * Two ways one exists. Usually the system fills the uploaded template
+   * and stores the result. Sometimes the office uploads a finished
+   * document instead — a reissue, a court-ordered wording, a hand-signed
+   * original a family wants scanned in. Both are certificates; `source`
+   * says which.
+   *
+   * Superseding, never overwriting. A replacement inserts a new row and
+   * marks the old one superseded. A certificate is a document somebody
+   * may hold a printed copy of, and "what did we give them in March" has
+   * to stay answerable.
+   *
+   * Field notes:
+   *   - `isSuperseded` — indexed with `contractId` so the current
+   *     certificate is one lookup, not a scan-and-sort.
+   *   - `templateId` — which blank it was filled from. Absent on an
+   *     uploaded one, because there was no template involved.
+   *   - `serial` — a human reference to quote on the phone. Distinct
+   *     from BIR receipt serials, which are a regulated sequence and
+   *     must never be borrowed for anything else.
+   */
+  certificates: defineTable({
+    contractId: v.id("contracts"),
+    customerId: v.id("customers"),
+    lotId: v.id("lots"),
+    serial: v.string(),
+    source: v.union(v.literal("generated"), v.literal("uploaded")),
+    storageId: v.id("_storage"),
+    mimeType: v.string(),
+    templateId: v.optional(v.id("certificateTemplates")),
+    issuedAt: v.number(),
+    issuedByUserId: v.id("users"),
+    note: v.optional(v.string()),
+    isSuperseded: v.boolean(),
+    supersededAt: v.optional(v.number()),
+    supersededByUserId: v.optional(v.id("users")),
+    supersededReason: v.optional(v.string()),
+  })
+    .index("by_contract_superseded", ["contractId", "isSuperseded"])
+    .index("by_contract", ["contractId"])
+    .index("by_customer", ["customerId"])
+    .index("by_serial", ["serial"]),
+
+  paymentPlans: defineTable({
+    name: v.string(),
+    description: v.optional(v.string()),
+    kind: v.union(v.literal("full_payment"), v.literal("installment")),
+    discountPercent: v.optional(v.number()),
+    downPaymentPercent: v.optional(v.number()),
+    termMonths: v.optional(v.number()),
+    surchargePercent: v.optional(v.number()),
+    appliesToLotTypes: v.array(
+      v.union(
+        v.literal("single"),
+        v.literal("family"),
+        v.literal("mausoleum"),
+        v.literal("niche"),
+      ),
+    ),
+    isDefault: v.boolean(),
+    sortOrder: v.number(),
+    isRetired: v.boolean(),
+    createdAt: v.number(),
+    createdByUserId: v.id("users"),
+    updatedAt: v.number(),
+    updatedByUserId: v.optional(v.id("users")),
+  })
+    .index("by_kind", ["kind"])
+    .index("by_isRetired", ["isRetired"])
+    .index("by_sortOrder", ["sortOrder"]),
+
+  /**
+   * Promotions — time-boxed offers on top of a plan.
+   *
+   * Distinct from `paymentPlans` because they expire. A plan is what
+   * the cemetery sells; a promotion is what it is doing this month, and
+   * the difference matters when someone asks in March how many lots the
+   * All Souls offer actually moved.
+   *
+   * Field notes:
+   *   - `startsAt` / `endsAt` — epoch ms. The window is half-open:
+   *     `startsAt` inclusive, `endsAt` exclusive, so an offer "until 5
+   *     November" ends at Manila midnight on the 5th and there is no
+   *     hour where two readings are possible.
+   *   - `discountPercent` XOR `discountCents` — one or the other. Both
+   *     is a data error; the pricing module applies the larger and says
+   *     so rather than silently compounding them.
+   *   - `appliesTo*` — empty means unrestricted, in every case.
+   *   - `maxRedemptions` / `redemptionCount` — an offer capped at fifty
+   *     lots must stop at fifty. The count is incremented inside the
+   *     sale mutation, in the same transaction as the contract, or two
+   *     concurrent sales both read forty-nine and both proceed.
+   *   - `code` — optional. A promotion with no code applies on its own
+   *     terms; one with a code has to be quoted deliberately.
+   */
+  promos: defineTable({
+    name: v.string(),
+    code: v.optional(v.string()),
+    description: v.optional(v.string()),
+    discountPercent: v.optional(v.number()),
+    discountCents: v.optional(v.number()),
+    startsAt: v.number(),
+    endsAt: v.number(),
+    appliesToLotTypes: v.array(
+      v.union(
+        v.literal("single"),
+        v.literal("family"),
+        v.literal("mausoleum"),
+        v.literal("niche"),
+      ),
+    ),
+    appliesToSections: v.array(v.string()),
+    appliesToPlanKinds: v.array(
+      v.union(v.literal("full_payment"), v.literal("installment")),
+    ),
+    maxRedemptions: v.optional(v.number()),
+    redemptionCount: v.number(),
+    isRetired: v.boolean(),
+    createdAt: v.number(),
+    createdByUserId: v.id("users"),
+    updatedAt: v.number(),
+    updatedByUserId: v.optional(v.id("users")),
+  })
+    .index("by_code", ["code"])
+    .index("by_isRetired", ["isRetired"])
+    .index("by_endsAt", ["endsAt"]),
 
   /**
    * Perpetual care policy — Story 3.8 rebuild (FR25).
@@ -3140,7 +3602,33 @@ export default defineSchema({
   reminderDeliveries: defineTable({
     customerId: v.id("customers"),
     contractId: v.id("contracts"),
-    installmentId: v.id("installments"),
+    /**
+     * OPTIONAL as of the paid-in-full notice.
+     *
+     * Every delivery until now was about one instalment falling due, so
+     * this was required. The message telling a family they have finished
+     * paying is about the CONTRACT, and has no instalment to point at —
+     * loosening the field was the alternative to standing up a second
+     * delivery system with its own retries, bounce handling and
+     * opt-out, which would have been strictly worse.
+     *
+     * Absent is only valid when `kind` says so. The `by_installment_rule`
+     * index still carries these rows, with `undefined` as the sentinel
+     * Convex uses; the daily scan only ever probes it with a real
+     * instalment id, so it never meets them.
+     */
+    installmentId: v.optional(v.id("installments")),
+    /**
+     * What this delivery is about. Absent means `installment_due`, so
+     * every row written before this field existed stays valid without a
+     * backfill.
+     */
+    kind: v.optional(
+      v.union(
+        v.literal("installment_due"),
+        v.literal("contract_paid_in_full"),
+      ),
+    ),
     channel: v.union(v.literal("sms"), v.literal("email")),
     templateKey: v.string(),
     ruleOffset: v.number(),
@@ -3160,6 +3648,10 @@ export default defineSchema({
     nextAttemptAt: v.optional(v.number()),
   })
     .index("by_installment_rule", ["installmentId", "ruleOffset", "channel"])
+    // One paid-in-full notice per contract, ever. A family that has
+    // finished paying should hear so once; hearing it twice reads as a
+    // system that does not know what it has already said.
+    .index("by_contract_kind", ["contractId", "kind"])
     .index("by_customer", ["customerId"])
     .index("by_status_scheduledAt", ["status", "scheduledAt"])
     .index("by_channel_status", ["channel", "status"]),

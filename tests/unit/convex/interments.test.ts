@@ -118,14 +118,43 @@ interface CtxBag {
   ctx: any;
 }
 
+/**
+ * A contract on the lot, and what has been paid against it.
+ *
+ * The harness needs these because `scheduleInterment` now refuses a lot
+ * whose contract has not reached the cemetery's payment threshold. With
+ * no contracts table the gate short-circuits and is never exercised —
+ * which is how a guard ends up wired but unproven.
+ */
+interface ContractFixture {
+  _id: string;
+  _creationTime: number;
+  lotId: string;
+  totalPriceCents: number;
+  state: string;
+}
+
+interface InstallmentFixture {
+  _id: string;
+  _creationTime: number;
+  contractId: string;
+  paidCents: number;
+}
+
 function makeCtx(opts: {
   roles?: RoleName[];
   initialLots?: LotFixture[];
   initialOccupants?: OccupantFixture[];
   initialInterments?: IntermentFixture[];
+  initialContracts?: ContractFixture[];
+  initialInstallments?: InstallmentFixture[];
+  /** Percentage of a contract that must be paid. Default 50. */
+  intermentThresholdPercent?: number;
   authenticated?: boolean;
   userName?: string;
 }): CtxBag {
+  const contracts = opts.initialContracts ?? [];
+  const installments = opts.initialInstallments ?? [];
   const lots = new Map<string, LotFixture>(
     (opts.initialLots ?? []).map((l) => [l._id, l]),
   );
@@ -268,6 +297,70 @@ function makeCtx(opts: {
         }
         if (table === "interments") {
           return makeIntermentsQueryBuilder();
+        }
+        if (table === "contracts") {
+          return {
+            withIndex: (_n: string, fn?: (q: unknown) => unknown) => {
+              const wanted: Record<string, unknown> = {};
+              if (fn !== undefined) {
+                fn({
+                  eq(field: string, value: unknown) {
+                    wanted[field] = value;
+                    return this;
+                  },
+                });
+              }
+              const rows = contracts.filter((c) =>
+                Object.entries(wanted).every(
+                  ([k, v]) => (c as unknown as Record<string, unknown>)[k] === v,
+                ),
+              );
+              return {
+                collect: async () => rows,
+                first: async () => rows[0] ?? null,
+                take: async (n: number) => rows.slice(0, n),
+              };
+            },
+          };
+        }
+        if (table === "installments") {
+          return {
+            withIndex: (_n: string, fn?: (q: unknown) => unknown) => {
+              const wanted: Record<string, unknown> = {};
+              if (fn !== undefined) {
+                fn({
+                  eq(field: string, value: unknown) {
+                    wanted[field] = value;
+                    return this;
+                  },
+                });
+              }
+              const rows = installments.filter((i) =>
+                Object.entries(wanted).every(
+                  ([k, v]) => (i as unknown as Record<string, unknown>)[k] === v,
+                ),
+              );
+              return {
+                collect: async () => rows,
+                first: async () => rows[0] ?? null,
+                take: async (n: number) => rows.slice(0, n),
+              };
+            },
+          };
+        }
+        if (table === "appSettings") {
+          const row = {
+            key: "singleton",
+            intermentPaymentThresholdPercent:
+              opts.intermentThresholdPercent ?? 50,
+          };
+          return {
+            withIndex: () => ({
+              collect: async () => [row],
+              first: async () => row,
+              take: async () => [row],
+            }),
+          };
         }
         return {
           withIndex: () => ({
@@ -2097,5 +2190,110 @@ describe("getCompletionPhotoUrl", () => {
       intermentId: "interments:any",
     }).catch((e) => e);
     expect(getCode(thrown)).toBe(ErrorCode.FORBIDDEN);
+  });
+});
+
+/**
+ * A lot turns `sold` the moment a contract exists, so the status check
+ * alone let an installment contract carrying nothing but a down payment
+ * take an interment. Once a family is in the ground the lot cannot
+ * practically be reclaimed, so the outstanding balance stops being a
+ * debt with collateral and becomes a loss.
+ *
+ * The cemetery's rule: half the contract, then interment is allowed.
+ */
+describe("scheduleInterment — payment threshold", () => {
+  const run = handlerOf(scheduleInterment);
+
+  const setup = (paidCents: number, thresholdPercent?: number) => {
+    const lot = makeLotFixture();
+    const occupant = makeOccupantFixture({ lotId: lot._id });
+    const bag = makeCtx({
+      roles: ["office_staff"],
+      initialLots: [lot],
+      initialOccupants: [occupant],
+      initialContracts: [
+        {
+          _id: "contracts:1",
+          _creationTime: T0,
+          lotId: lot._id,
+          totalPriceCents: 100_000_00,
+          state: "active",
+        },
+      ],
+      initialInstallments: [
+        {
+          _id: "installments:1",
+          _creationTime: T0,
+          contractId: "contracts:1",
+          paidCents,
+        },
+      ],
+      ...(thresholdPercent === undefined
+        ? {}
+        : { intermentThresholdPercent: thresholdPercent }),
+    });
+    return { bag, lot, occupant };
+  };
+
+  const schedule = async (bag: CtxBag, lotId: string, occupantId: string) =>
+    run(bag.ctx, {
+      lotId,
+      occupantId,
+      scheduledAt: T0 + 14 * DAY_MS,
+    });
+
+  it("refuses a contract below the threshold", async () => {
+    const { bag, lot, occupant } = setup(20_000_00);
+    let thrown: unknown;
+    try {
+      await schedule(bag, lot._id, occupant._id);
+    } catch (e) {
+      thrown = e;
+    }
+    expect(getCode(thrown)).toBe("INVARIANT_VIOLATION");
+    expect(bag.interments.size).toBe(0);
+  });
+
+  it("names the shortfall in pesos so the office can act on it", async () => {
+    const { bag, lot, occupant } = setup(20_000_00);
+    let thrown: unknown;
+    try {
+      await schedule(bag, lot._id, occupant._id);
+    } catch (e) {
+      thrown = e;
+    }
+    const payload = (thrown as ConvexError<Value>).data as unknown as {
+      message?: string;
+      details?: { shortfallCents?: number };
+    };
+    expect(payload.message ?? "").toContain("₱30,000");
+    expect(payload.details?.shortfallCents).toBe(30_000_00);
+  });
+
+  it("allows a contract at the threshold", async () => {
+    const { bag, lot, occupant } = setup(50_000_00);
+    await schedule(bag, lot._id, occupant._id);
+    expect(bag.interments.size).toBe(1);
+  });
+
+  it("honours a threshold the cemetery has lowered", async () => {
+    const { bag, lot, occupant } = setup(20_000_00, 10);
+    await schedule(bag, lot._id, occupant._id);
+    expect(bag.interments.size).toBe(1);
+  });
+
+  it("puts no condition on a lot with no open contract", async () => {
+    // A lot bought outright years ago, or one whose contract is settled
+    // and closed, has nothing left to gate on.
+    const lot = makeLotFixture();
+    const occupant = makeOccupantFixture({ lotId: lot._id });
+    const bag = makeCtx({
+      roles: ["office_staff"],
+      initialLots: [lot],
+      initialOccupants: [occupant],
+    });
+    await schedule(bag, lot._id, occupant._id);
+    expect(bag.interments.size).toBe(1);
   });
 });

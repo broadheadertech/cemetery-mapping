@@ -57,3 +57,6 @@ public/sw.js.map
 
 # Windows/MSYS crash dumps
 *.stackdump
+
+# Scratch typecheck sandbox — not part of this project.
+.tmp-tc/

@@ -48,6 +48,24 @@ const GROUPS: AdminGroup[] = [
         description: "Runtime toggles, e.g. sales-agent tracking.",
       },
       {
+        href: "/admin/settings/sales-agents",
+        title: "Sales agents",
+        description:
+          "Who sells for the park, their commission rates, and how far a family must have paid before a commission is owed.",
+      },
+      {
+        href: "/admin/settings/certificate",
+        title: "Certificate of ownership",
+        description:
+          "Upload the park's own certificate and say where each detail goes on it. Fully-paid contracts are filled from it.",
+      },
+      {
+        href: "/admin/settings/payment-plans",
+        title: "Payment plans and promotions",
+        description:
+          "The ways a lot can be bought — cash terms, instalment options, and time-boxed offers. The sale desk fills a contract from these.",
+      },
+      {
         href: "/admin/settings/perpetual-care",
         title: "Perpetual-care policy",
         description:

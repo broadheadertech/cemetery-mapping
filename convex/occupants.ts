@@ -42,9 +42,16 @@ import {
 import { v } from "convex/values";
 
 import schema from "./schema";
-import { requireRole, type MutationCtx, type QueryCtx } from "./lib/auth";
+import { requireRole, type MutationCtx, type QueryCtx,
+  type AuthPayload,
+} from "./lib/auth";
 import { emitAudit } from "./lib/audit";
 import { ErrorCode, throwError } from "./lib/errors";
+import {
+  canAdmit,
+  capacityReport,
+  type IntermentKind,
+} from "./lib/lotCapacity";
 import { DAY_MS } from "./lib/time";
 
 type DataModel = DataModelFromSchemaDefinition<typeof schema>;
@@ -137,11 +144,223 @@ export const listLotOccupants = queryGeneric({
  * an audit row keyed on the LOT (not the occupant — the lot is the
  * aggregate root for the audit feed).
  */
+/**
+ * Everything `addOccupant` does except authenticate the caller.
+ *
+ * Extracted so the quick-response desk flow can record the deceased and
+ * book their interment in one transaction. The capacity check below is
+ * the reason this must not be reimplemented anywhere: it is what stops
+ * a family being told there is room beside their father when there is
+ * not.
+ *
+ * Callers must have authenticated the user themselves and pass the
+ * payload; it is used for attribution only, never for authorisation.
+ */
+export async function createOccupant(
+  ctx: MutationCtx,
+  auth: AuthPayload,
+  args: {
+    lotId: LotId;
+    name: string;
+    intermentKind?: IntermentKind;
+    dateOfInterment?: number;
+    dateOfDeath?: number;
+    relationshipToOwner: string;
+    notes?: string;
+  },
+): Promise<{ occupantId: OccupantId }> {
+  const trimmedName = args.name.trim();
+  const trimmedRelationship = args.relationshipToOwner.trim();
+  const trimmedNotes = args.notes !== undefined ? args.notes.trim() : undefined;
+
+  if (
+    trimmedName.length < OCCUPANT_NAME_MIN_LENGTH ||
+    trimmedName.length > OCCUPANT_NAME_MAX_LENGTH
+  ) {
+    throwError(
+      ErrorCode.VALIDATION,
+      `Name must be between ${OCCUPANT_NAME_MIN_LENGTH} and ${OCCUPANT_NAME_MAX_LENGTH} characters.`,
+    );
+  }
+  if (trimmedRelationship.length === 0) {
+    throwError(
+      ErrorCode.VALIDATION,
+      "Relationship to owner is required.",
+    );
+  }
+  if (trimmedRelationship.length > OCCUPANT_RELATIONSHIP_MAX_LENGTH) {
+    throwError(
+      ErrorCode.VALIDATION,
+      `Relationship to owner must be ${OCCUPANT_RELATIONSHIP_MAX_LENGTH} characters or fewer.`,
+    );
+  }
+  if (
+    trimmedNotes !== undefined &&
+    trimmedNotes.length > OCCUPANT_NOTES_MAX_LENGTH
+  ) {
+    throwError(
+      ErrorCode.VALIDATION,
+      `Notes must be ${OCCUPANT_NOTES_MAX_LENGTH} characters or fewer.`,
+    );
+  }
+  if (args.dateOfInterment !== undefined) {
+    if (
+      !Number.isFinite(args.dateOfInterment) ||
+      !Number.isInteger(args.dateOfInterment) ||
+      args.dateOfInterment <= 0
+    ) {
+      throwError(
+        ErrorCode.VALIDATION,
+        "Date of interment must be a positive integer (unix ms).",
+      );
+    }
+    // Manila tz tolerance — allow same-day recording with a slight
+    // clock skew (one day). Interment cannot meaningfully be in the
+    // future.
+    if (args.dateOfInterment > Date.now() + DAY_MS) {
+      throwError(
+        ErrorCode.VALIDATION,
+        "Date of interment cannot be in the future.",
+      );
+    }
+  }
+  if (args.dateOfDeath !== undefined) {
+    if (
+      !Number.isFinite(args.dateOfDeath) ||
+      !Number.isInteger(args.dateOfDeath) ||
+      args.dateOfDeath <= 0
+    ) {
+      throwError(
+        ErrorCode.VALIDATION,
+        "Date of death must be a positive integer (unix ms).",
+      );
+    }
+    // Same one-day tolerance as interment: a phone or a desk PC in
+    // Manila can be a few hours off, and a death recorded on the day it
+    // happened must not be rejected for it.
+    if (args.dateOfDeath > Date.now() + DAY_MS) {
+      throwError(
+        ErrorCode.VALIDATION,
+        "Date of death cannot be in the future.",
+      );
+    }
+    if (
+      args.dateOfInterment !== undefined &&
+      args.dateOfInterment < args.dateOfDeath
+    ) {
+      throwError(
+        ErrorCode.VALIDATION,
+        "Date of interment cannot be before the date of death.",
+      );
+    }
+  }
+
+  const lot = await ctx.db.get(args.lotId);
+  if (lot === null) {
+    throwError(ErrorCode.NOT_FOUND, "Lot not found.", {
+      lotId: args.lotId,
+    });
+  }
+  if (lot.isRetired) {
+    throwError(
+      ErrorCode.INVARIANT_VIOLATION,
+      "Cannot add an occupant to a retired lot.",
+      { lotId: args.lotId },
+    );
+  }
+
+  // Capacity. Until now nothing stopped a lot being filled past what
+  // it physically holds — the only guard was a double-booking check on
+  // TIME, which says nothing about space. A family told there is room
+  // beside their father, at the graveside, is not a defect anyone can
+  // apologise their way out of.
+  const kind: IntermentKind = args.intermentKind ?? "body";
+  const existing = await ctx.db
+    .query("occupants")
+    .withIndex("by_lot", (q) => q.eq("lotId", args.lotId))
+    .collect();
+  const admit = canAdmit(lot, existing, kind);
+  if (!admit.ok) {
+    throwError(ErrorCode.INVARIANT_VIOLATION, admit.reason ?? "Lot is full.", {
+      kind: "LOT_AT_CAPACITY",
+      lotId: args.lotId,
+      capacityUnits: admit.report.capacityUnits,
+      usedUnits: admit.report.usedUnits,
+      remainingUnits: admit.report.remainingUnits,
+    });
+  }
+
+  const createdAt = Date.now();
+  const insertRow: {
+    lotId: LotId;
+    name: string;
+    intermentKind?: IntermentKind;
+    dateOfInterment?: number;
+    dateOfDeath?: number;
+    relationshipToOwner: string;
+    notes?: string;
+    createdAt: number;
+    createdByUserId: typeof auth.userId;
+    isRemoved: boolean;
+  } = {
+    lotId: args.lotId,
+    name: trimmedName,
+    intermentKind: kind,
+    relationshipToOwner: trimmedRelationship,
+    createdAt,
+    createdByUserId: auth.userId,
+    isRemoved: false,
+  };
+  if (args.dateOfInterment !== undefined) {
+    insertRow.dateOfInterment = args.dateOfInterment;
+  }
+  if (args.dateOfDeath !== undefined) {
+    insertRow.dateOfDeath = args.dateOfDeath;
+  }
+  if (trimmedNotes !== undefined && trimmedNotes.length > 0) {
+    insertRow.notes = trimmedNotes;
+  }
+  const occupantId = await ctx.db.insert("occupants", insertRow);
+
+  // The audit row is keyed on the LOT, not the occupant — occupants
+  // are sub-entities of a lot for audit purposes (matches the FR16
+  // ownership-history audit pattern). The `entityType` enum on
+  // `auditLog` does not contain "occupant" deliberately; the lot
+  // groups all sub-events.
+  await emitAudit(ctx, {
+    action: "create",
+    entityType: "lot",
+    entityId: args.lotId,
+    after: {
+      occupantId,
+      name: trimmedName,
+      intermentKind: kind,
+      dateOfInterment: args.dateOfInterment,
+      relationshipToOwner: trimmedRelationship,
+    },
+  });
+
+  return { occupantId };
+}
+
 export const addOccupant = mutationGeneric({
   args: {
     lotId: v.id("lots"),
     name: v.string(),
+    /**
+     * A body, or a set of transferred bones. Bones take half the space
+     * — see `convex/lib/lotCapacity.ts`. Defaults to `body`, the
+     * larger of the two, so an omission can never overfill a lot.
+     */
+    intermentKind: v.optional(
+      v.union(v.literal("body"), v.literal("bones")),
+    ),
     dateOfInterment: v.optional(v.number()),
+    /**
+     * When the person died. Distinct from `dateOfInterment` — the
+     * family knows this before a burial date exists.
+     */
+    dateOfDeath: v.optional(v.number()),
     relationshipToOwner: v.string(),
     notes: v.optional(v.string()),
   },
@@ -150,127 +369,15 @@ export const addOccupant = mutationGeneric({
     args: {
       lotId: LotId;
       name: string;
+      intermentKind?: IntermentKind;
       dateOfInterment?: number;
+      dateOfDeath?: number;
       relationshipToOwner: string;
       notes?: string;
     },
   ): Promise<{ occupantId: OccupantId }> => {
     const auth = await requireRole(ctx, ["admin", "office_staff"]);
-
-    const trimmedName = args.name.trim();
-    const trimmedRelationship = args.relationshipToOwner.trim();
-    const trimmedNotes = args.notes !== undefined ? args.notes.trim() : undefined;
-
-    if (
-      trimmedName.length < OCCUPANT_NAME_MIN_LENGTH ||
-      trimmedName.length > OCCUPANT_NAME_MAX_LENGTH
-    ) {
-      throwError(
-        ErrorCode.VALIDATION,
-        `Name must be between ${OCCUPANT_NAME_MIN_LENGTH} and ${OCCUPANT_NAME_MAX_LENGTH} characters.`,
-      );
-    }
-    if (trimmedRelationship.length === 0) {
-      throwError(
-        ErrorCode.VALIDATION,
-        "Relationship to owner is required.",
-      );
-    }
-    if (trimmedRelationship.length > OCCUPANT_RELATIONSHIP_MAX_LENGTH) {
-      throwError(
-        ErrorCode.VALIDATION,
-        `Relationship to owner must be ${OCCUPANT_RELATIONSHIP_MAX_LENGTH} characters or fewer.`,
-      );
-    }
-    if (
-      trimmedNotes !== undefined &&
-      trimmedNotes.length > OCCUPANT_NOTES_MAX_LENGTH
-    ) {
-      throwError(
-        ErrorCode.VALIDATION,
-        `Notes must be ${OCCUPANT_NOTES_MAX_LENGTH} characters or fewer.`,
-      );
-    }
-    if (args.dateOfInterment !== undefined) {
-      if (
-        !Number.isFinite(args.dateOfInterment) ||
-        !Number.isInteger(args.dateOfInterment) ||
-        args.dateOfInterment <= 0
-      ) {
-        throwError(
-          ErrorCode.VALIDATION,
-          "Date of interment must be a positive integer (unix ms).",
-        );
-      }
-      // Manila tz tolerance — allow same-day recording with a slight
-      // clock skew (one day). Interment cannot meaningfully be in the
-      // future.
-      if (args.dateOfInterment > Date.now() + DAY_MS) {
-        throwError(
-          ErrorCode.VALIDATION,
-          "Date of interment cannot be in the future.",
-        );
-      }
-    }
-
-    const lot = await ctx.db.get(args.lotId);
-    if (lot === null) {
-      throwError(ErrorCode.NOT_FOUND, "Lot not found.", {
-        lotId: args.lotId,
-      });
-    }
-    if (lot.isRetired) {
-      throwError(
-        ErrorCode.INVARIANT_VIOLATION,
-        "Cannot add an occupant to a retired lot.",
-        { lotId: args.lotId },
-      );
-    }
-
-    const createdAt = Date.now();
-    const insertRow: {
-      lotId: LotId;
-      name: string;
-      dateOfInterment?: number;
-      relationshipToOwner: string;
-      notes?: string;
-      createdAt: number;
-      createdByUserId: typeof auth.userId;
-      isRemoved: boolean;
-    } = {
-      lotId: args.lotId,
-      name: trimmedName,
-      relationshipToOwner: trimmedRelationship,
-      createdAt,
-      createdByUserId: auth.userId,
-      isRemoved: false,
-    };
-    if (args.dateOfInterment !== undefined) {
-      insertRow.dateOfInterment = args.dateOfInterment;
-    }
-    if (trimmedNotes !== undefined && trimmedNotes.length > 0) {
-      insertRow.notes = trimmedNotes;
-    }
-    const occupantId = await ctx.db.insert("occupants", insertRow);
-
-    // The audit row is keyed on the LOT, not the occupant — occupants
-    // are sub-entities of a lot for audit purposes (matches the FR16
-    // ownership-history audit pattern). The `entityType` enum on
-    // `auditLog` does not contain "occupant" deliberately; the lot
-    // groups all sub-events.
-    await emitAudit(ctx, {
-      action: "create",
-      entityType: "lot",
-      entityId: args.lotId,
-      after: {
-        occupantId,
-        name: trimmedName,
-        dateOfInterment: args.dateOfInterment,
-        relationshipToOwner: trimmedRelationship,
-      },
-    });
-
-    return { occupantId };
+    return createOccupant(ctx, auth, args);
   },
 });
 
@@ -334,5 +441,47 @@ export const removeOccupant = mutationGeneric({
     });
 
     return { occupantId: args.occupantId };
+  },
+});
+
+/**
+ * What room a lot has left.
+ *
+ * Backs the lot detail page and the quick-response scheduler, so both
+ * answer "will another interment fit here?" from the same arithmetic
+ * that `addOccupant` enforces. A screen that computed its own would
+ * eventually disagree with the mutation, and the family would be told
+ * one thing by the page and another by the save button.
+ */
+export const getLotCapacity = queryGeneric({
+  args: { lotId: v.id("lots") },
+  handler: async (
+    ctx: QueryCtx,
+    args: { lotId: LotId },
+  ): Promise<{
+    capacityUnits: number;
+    usedUnits: number;
+    remainingUnits: number;
+    bodiesRemaining: number;
+    bonesRemaining: number;
+    isFull: boolean;
+    canTakeBody: boolean;
+    canTakeBones: boolean;
+  }> => {
+    await requireRole(ctx, ["admin", "office_staff", "field_worker"]);
+    const lot = await ctx.db.get(args.lotId);
+    if (lot === null) {
+      throwError(ErrorCode.NOT_FOUND, "Lot not found.", { lotId: args.lotId });
+    }
+    const occupants = await ctx.db
+      .query("occupants")
+      .withIndex("by_lot", (q) => q.eq("lotId", args.lotId))
+      .collect();
+    const report = capacityReport(lot, occupants);
+    return {
+      ...report,
+      canTakeBody: canAdmit(lot, occupants, "body").ok,
+      canTakeBones: canAdmit(lot, occupants, "bones").ok,
+    };
   },
 });

@@ -146,12 +146,12 @@ describe("CustomerDetail orchestrator", () => {
     expect(value.textContent).not.toContain("1234-5678");
   });
 
-  it("renders the audit-trail deep link", () => {
+  it("renders the audit-trail deep link at the route that exists", () => {
     render(<CustomerDetail detail={baseDetail} />);
     const link = screen.getByTestId("customer-audit-link");
     expect(link).toHaveAttribute(
       "href",
-      "/audit?entityType=customer&entityId=customers:c1",
+      "/admin/audit-log?entityType=customer&entityId=customers:c1",
     );
   });
 

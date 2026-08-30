@@ -35,7 +35,16 @@
  * reach the error surface rather than being quietly redirected away.
  */
 
-import { Component, type ReactNode, useEffect, useRef } from "react";
+import {
+  Component,
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { useAuthActions } from "@convex-dev/auth/react";
 
@@ -104,6 +113,82 @@ function RedirectToSignIn({
   );
 }
 
+/**
+ * Deliberate sign-out, as distinct from an expired one.
+ *
+ * Clicking "Sign out" tears down auth while the page is still mounted.
+ * Every `useQuery` under it then rejects, and `useQuery` surfaces a
+ * rejected query by THROWING during render — so the ordinary act of
+ * logging out raced a tree full of live subscriptions and landed on
+ * React's crash screen.
+ *
+ * Redirecting first does not fix it: `router.push` is asynchronous, and
+ * the dashboard keeps rendering until the new route commits.
+ *
+ * The fix is to stop rendering the queries BEFORE clearing the session.
+ * `beginSignOut()` swaps the whole guarded subtree for a message, which
+ * unmounts every subscription synchronously; only then is `signOut()`
+ * called. Nothing is left mounted to throw.
+ */
+interface SignOutControls {
+  beginSignOut: () => void;
+  signingOut: boolean;
+}
+
+const SignOutContext = createContext<SignOutControls>({
+  beginSignOut: () => {},
+  signingOut: false,
+});
+
+/**
+ * Start a clean sign-out. Safe to call outside a guard — it degrades to
+ * a no-op rather than throwing, so a component can use it without
+ * knowing where it is mounted.
+ */
+export function useSignOut(): SignOutControls {
+  return useContext(SignOutContext);
+}
+
+/**
+ * Clears the session and leaves, once nothing is left rendering
+ * queries.
+ *
+ * A hard navigation rather than `router.replace`: the whole point is
+ * that no React tree survives the transition holding a stale token.
+ */
+function SigningOut({ signInPath }: { signInPath: string }): ReactNode {
+  const { signOut } = useAuthActions();
+  const started = useRef(false);
+
+  useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    void (async () => {
+      try {
+        await signOut();
+      } catch {
+        // A failed sign-out leaves a token the next request rejects
+        // anyway. Getting the person to the form matters more.
+      }
+      window.location.assign(signInPath);
+    })();
+  }, [signInPath, signOut]);
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      data-testid="signing-out"
+      className="flex min-h-[60vh] flex-col items-center justify-center gap-3 px-6 text-center"
+    >
+      <span className="h-8 w-8 animate-spin rounded-full border-2 border-surface-border border-t-primary" />
+      <p className="font-display text-xl font-light text-text-default">
+        Signing you out…
+      </p>
+    </div>
+  );
+}
+
 interface SessionGuardProps {
   children: ReactNode;
   /** Where this part of the app signs in. */
@@ -114,7 +199,33 @@ interface SessionGuardState {
   expired: boolean;
 }
 
-export class SessionGuard extends Component<
+/**
+ * Wraps the error boundary with the deliberate-sign-out state.
+ *
+ * Two different situations that look the same to a user and must not be
+ * conflated: a session that ran out (the boundary catches a rejected
+ * query and says "your session has ended"), and a person choosing to
+ * leave (nothing has gone wrong, and they should not be told it has).
+ */
+export function SessionGuard({
+  children,
+  signInPath = "/login",
+}: SessionGuardProps): ReactNode {
+  const [signingOut, setSigningOut] = useState(false);
+  const beginSignOut = useCallback(() => setSigningOut(true), []);
+
+  if (signingOut) return <SigningOut signInPath={signInPath} />;
+
+  return (
+    <SignOutContext.Provider value={{ beginSignOut, signingOut }}>
+      <SessionExpiryBoundary signInPath={signInPath}>
+        {children}
+      </SessionExpiryBoundary>
+    </SignOutContext.Provider>
+  );
+}
+
+class SessionExpiryBoundary extends Component<
   SessionGuardProps,
   SessionGuardState
 > {

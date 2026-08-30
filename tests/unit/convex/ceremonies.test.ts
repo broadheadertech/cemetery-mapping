@@ -67,7 +67,7 @@ interface CustomerFixture {
 interface CeremonyFixture {
   _id: string;
   _creationTime: number;
-  kind: "consecration" | "interment" | "memorial_anniversary";
+  kind: "consecration" | "interment" | "memorial_anniversary" | "wake";
   contractId: string;
   familyEstateId?: string;
   lotId: string;
@@ -822,5 +822,77 @@ describe("getCeremony + listCeremonies", () => {
     const result = (await list(ctx, {})) as Array<{ scheduledAt: number }>;
     expect(result).toHaveLength(2);
     expect(result[0]!.scheduledAt).toBeLessThan(result[1]!.scheduledAt);
+  });
+});
+
+/**
+ * A wake is the vigil before burial. For most families it is the longest
+ * time they spend on the grounds, and it competes for the chapel with
+ * every other booking — so it has to sit in the same conflict-checked
+ * calendar rather than in a notebook behind the desk.
+ */
+describe("wake", () => {
+  const run = handlerOf(scheduleCeremony);
+
+  it("can be scheduled like any other ceremony", async () => {
+    const { ctx } = makeCtx({
+      roles: ["office_staff"],
+      initialLots: [makeLot()],
+      initialContracts: [makeContract()],
+      initialCustomers: [makeCustomer()],
+    });
+    const result = (await run(ctx, {
+      kind: "wake",
+      contractId: "contracts:1",
+      lotId: "lots:1",
+      scheduledAt: T0 + 3 * DAY_MS,
+      durationMinutes: 240,
+      chapelReserved: true,
+      pathwayReserved: false,
+    })) as { ceremonyId: string };
+    expect(result.ceremonyId).toBeTruthy();
+  });
+
+  it("competes for the chapel with the other kinds", async () => {
+    // The reason it belongs in this table at all: an unrecorded wake
+    // means two families in the chapel at once.
+    const at = T0 + 3 * DAY_MS;
+    const existing: CeremonyFixture = {
+      _id: "ceremonies:wake",
+      _creationTime: T0,
+      kind: "wake",
+      contractId: "contracts:1",
+      lotId: "lots:1",
+      scheduledAt: at,
+      durationMinutes: 240,
+      chapelReserved: true,
+      pathwayReserved: false,
+      status: "scheduled",
+      scheduledBy: USER_ID,
+      scheduledAt_createdAt: T0,
+    };
+    const { ctx } = makeCtx({
+      roles: ["office_staff"],
+      initialLots: [makeLot()],
+      initialContracts: [makeContract()],
+      initialCustomers: [makeCustomer()],
+      initialCeremonies: [existing],
+    });
+
+    let thrown: unknown;
+    try {
+      await run(ctx, {
+        kind: "consecration",
+        contractId: "contracts:1",
+        lotId: "lots:1",
+        scheduledAt: at + 30 * MINUTE_MS,
+        durationMinutes: 60,
+        chapelReserved: true,
+        pathwayReserved: false,
+      });
+    } catch (e) {
+      thrown = e;
+    }
+    expect(getCode(thrown)).toBe("SCHEDULING_CONFLICT");
   });
 });

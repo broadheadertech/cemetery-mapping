@@ -126,7 +126,11 @@ export type AuditEntityType =
   | "family_estate"
   | "ceremony"
   | "plaque_draft"
-  | "enquiry";
+  | "enquiry"
+  | "payment_plan"
+  | "promo"
+  | "certificate_template"
+  | "sales_agent";
 
 /**
  * PII field names that `redactPii` recognizes. Extend the set as new

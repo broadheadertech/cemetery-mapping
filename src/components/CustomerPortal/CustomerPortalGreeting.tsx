@@ -24,6 +24,9 @@ import { makeFunctionReference } from "convex/server";
  * surfaces in this repo (e.g. `src/middleware.ts`,
  * `src/app/(staff)/layout.tsx`) follow the same pattern — keep the
  * typecheck clean ahead of codegen.
+ *
+ * @gated-route-only — mounts on `/portal`; middleware sends every
+ * non-customer role away from the `/portal` family.
  */
 
 export interface CustomerPortalGreetingProps {

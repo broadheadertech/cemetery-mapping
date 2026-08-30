@@ -74,9 +74,24 @@ describe("pdfkit imports", () => {
     ).toEqual([]);
   });
 
-  it("every generator actually uses the shared module", () => {
-    const generators = files.filter((f) =>
-      /generate.*Pdf\.ts$|generateReportExport\.ts$/.test(f),
+  it("every PDFKit generator actually uses the shared module", () => {
+    // Narrowed to the ones that use PDFKit. `generateCertificatePdf`
+    // uses `pdf-lib` instead — PDFKit builds a document from nothing and
+    // cannot open an existing PDF, so it could not overlay the park's
+    // uploaded blank at all. The rule this file enforces exists because
+    // PDFKit's standard fonts read `.afm` files off disk and throw
+    // ENOENT once deployed; `pdf-lib` carries its Standard-14 metrics in
+    // the bundle and has no such failure, so the shared wrapper has
+    // nothing to give it.
+    // Selected by EXCLUSION, not by looking for a `pdfkit` import —
+    // the whole point of the shared module is that these files import
+    // the wrapper and never name the package, so an inclusive filter
+    // matches nothing and passes vacuously. (It did; the count
+    // assertion below is what caught it.)
+    const generators = files.filter(
+      (f) =>
+        /generate.*Pdf\.ts$|generateReportExport\.ts$/.test(f) &&
+        !/from\s+["']pdf-lib["']/.test(readFileSync(f, "utf8")),
     );
     // A silent zero would make this vacuous.
     expect(generators.length).toBeGreaterThanOrEqual(4);
@@ -88,5 +103,18 @@ describe("pdfkit imports", () => {
         /from\s+["']\.\.\/lib\/pdfDocument["']/,
       );
     }
+  });
+
+  it("the non-PDFKit generator is exempt for a reason, not by luck", () => {
+    // Guards the narrowing above. If the certificate generator ever
+    // switches to PDFKit it must come back under the rule, rather than
+    // slipping through a filter written when it did not need to.
+    const certificate = files.find((f) =>
+      f.endsWith("generateCertificatePdf.ts"),
+    );
+    expect(certificate).toBeDefined();
+    const src = readFileSync(certificate as string, "utf8");
+    expect(src).toMatch(/from\s+["']pdf-lib["']/);
+    expect(src).not.toMatch(/from\s+["']pdfkit/);
   });
 });

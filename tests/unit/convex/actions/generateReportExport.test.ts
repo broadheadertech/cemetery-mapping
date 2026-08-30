@@ -177,7 +177,7 @@ describe("generateReportExport — audit_log adapter (P0-2)", () => {
     throw new Error("Cannot locate handler on Convex function");
   }
 
-  it("forwards row.args.from / row.args.to to the auditLogQueries.listRecent query (CSV)", async () => {
+  it("forwards row.args.from / row.args.to to the internal audit read (CSV)", async () => {
     const FROM = new Date("2026-01-01T00:00:00+08:00").getTime();
     const TO = new Date("2026-03-31T23:59:59+08:00").getTime();
     const exportRow = {
@@ -199,7 +199,7 @@ describe("generateReportExport — audit_log adapter (P0-2)", () => {
         if (path.includes("exports:internal_getExportRow")) {
           return exportRow;
         }
-        if (path.includes("auditLogQueries:listRecent")) {
+        if (path.includes("auditLogQueries:internal_recentAuditPageForExport")) {
           return {
             page: [
               {
@@ -233,7 +233,7 @@ describe("generateReportExport — audit_log adapter (P0-2)", () => {
     await run(ctx, { exportId: "exports:1" });
 
     const auditCall = capturedQueryArgs.find((c) =>
-      c.path.includes("auditLogQueries:listRecent"),
+      c.path.includes("auditLogQueries:internal_recentAuditPageForExport"),
     );
     expect(auditCall).toBeDefined();
     const auditArgs = auditCall!.args as {
@@ -270,7 +270,7 @@ describe("generateReportExport — audit_log adapter (P0-2)", () => {
         const path = getFunctionName(ref);
         capturedQueryArgs.push({ path, args });
         if (path.includes("exports:internal_getExportRow")) return exportRow;
-        if (path.includes("auditLogQueries:listRecent")) {
+        if (path.includes("auditLogQueries:internal_recentAuditPageForExport")) {
           return { page: [], isDone: true, continueCursor: null };
         }
         throw new Error(`Unexpected runQuery: ${path}`);
@@ -284,7 +284,7 @@ describe("generateReportExport — audit_log adapter (P0-2)", () => {
     const run = handlerOf(generateReportExport);
     await run(ctx, { exportId: "exports:1" });
     const auditCall = capturedQueryArgs.find((c) =>
-      c.path.includes("auditLogQueries:listRecent"),
+      c.path.includes("auditLogQueries:internal_recentAuditPageForExport"),
     );
     const auditArgs = auditCall!.args as { from?: number; to?: number };
     expect(auditArgs.from).toBeUndefined();

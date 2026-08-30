@@ -98,6 +98,10 @@ export interface ListedSection {
   isRetired: boolean;
   createdAt: number;
   createdBy: SectionDoc["createdBy"];
+  /** Columns across on the 3D map. Null when nobody has set a layout. */
+  gridColumns: number | null;
+  /** Rows deep on the 3D map. Null when nobody has set a layout. */
+  gridRows: number | null;
   linkedLotCount: number;
 }
 
@@ -142,6 +146,11 @@ export const listSections = queryGeneric({
         sortOrder: row.sortOrder,
         kind: row.kind,
         isRetired: row.isRetired,
+        // The 3D map's arrangement for this garden. Null when nobody
+        // has set one — the map then derives a square-ish grid and says
+        // it did.
+        gridColumns: row.gridColumns ?? null,
+        gridRows: row.gridRows ?? null,
         createdAt: row.createdAt,
         createdBy: row.createdBy,
         linkedLotCount: linkedLots.length,
@@ -617,3 +626,94 @@ function validateDescription(description: string): void {
     );
   }
 }
+
+/**
+ * Set how a garden is drawn on the 3D map.
+ *
+ * Separate from `updateSection` because it is a different act with a
+ * different audience: renaming a garden is a records decision, and
+ * saying it is six lots across is a drawing decision somebody makes
+ * while looking at the map. Office staff may do it — they are the ones
+ * who know the garden — where the rest of `updateSection` is admin-only.
+ *
+ * The grid does not have to match the lot count. A garden with 28 lots
+ * drawn 6×5 shows 28 of 30 cells filled, which is what the ground looks
+ * like anyway; the map draws what fits and leaves the rest as turf.
+ */
+export const setSectionLayout = mutationGeneric({
+  args: {
+    sectionId: v.id("sections"),
+    gridColumns: v.number(),
+    gridRows: v.number(),
+    tintHex: v.optional(v.number()),
+  },
+  handler: async (
+    ctx: MutationCtx,
+    args: {
+      sectionId: SectionId;
+      gridColumns: number;
+      gridRows: number;
+      tintHex?: number;
+    },
+  ): Promise<{ sectionId: SectionId }> => {
+    await requireRole(ctx, ["admin", "office_staff"]);
+
+    const existing = await ctx.db.get(args.sectionId);
+    if (existing === null) {
+      throwError(ErrorCode.NOT_FOUND, "Section not found.", {
+        sectionId: args.sectionId,
+      });
+    }
+
+    // A grid is a drawing, and a drawing nobody can read is not a
+    // drawing. Forty across renders as a smear; zero renders as
+    // nothing. Both are refused rather than clamped, because a number
+    // silently changed is worse than one rejected.
+    for (const [label, value] of [
+      ["Columns", args.gridColumns],
+      ["Rows", args.gridRows],
+    ] as const) {
+      if (!Number.isInteger(value) || value < 1 || value > 40) {
+        throwError(
+          ErrorCode.VALIDATION,
+          `${label} must be a whole number between 1 and 40.`,
+          { value },
+        );
+      }
+    }
+    if (args.tintHex !== undefined) {
+      if (
+        !Number.isInteger(args.tintHex) ||
+        args.tintHex < 0 ||
+        args.tintHex > 0xffffff
+      ) {
+        throwError(
+          ErrorCode.VALIDATION,
+          "The turf colour must be a whole number between 0x000000 and 0xFFFFFF.",
+          { tintHex: args.tintHex },
+        );
+      }
+    }
+
+    const patch: Record<string, unknown> = {
+      gridColumns: args.gridColumns,
+      gridRows: args.gridRows,
+    };
+    if (args.tintHex !== undefined) patch.tintHex = args.tintHex;
+
+    await ctx.db.patch(args.sectionId, patch as never);
+    await emitAudit(ctx, {
+      action: "update",
+      entityType: "section",
+      entityId: args.sectionId,
+      before: {
+        gridColumns: existing.gridColumns ?? null,
+        gridRows: existing.gridRows ?? null,
+      },
+      after: { gridColumns: args.gridColumns, gridRows: args.gridRows },
+      reason: `Map layout for ${existing.displayName} set to ${args.gridColumns} by ${args.gridRows}`,
+    });
+
+    return { sectionId: args.sectionId };
+  },
+});

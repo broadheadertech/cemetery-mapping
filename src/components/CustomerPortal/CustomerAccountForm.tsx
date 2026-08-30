@@ -48,6 +48,9 @@
  *     NFR-A1 / UX form patterns).
  *   - Read-only fields advertise their state via both `readOnly` and
  *     `aria-readonly="true"` so screen readers narrate them as such.
+ *
+ * @gated-route-only — mounts on `/portal/account`; middleware sends
+ * every non-customer role away from the `/portal` family.
  */
 
 import { useEffect, useMemo, useState } from "react";

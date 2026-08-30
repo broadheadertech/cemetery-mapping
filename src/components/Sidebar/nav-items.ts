@@ -21,6 +21,7 @@ import {
   LineChart,
   Boxes,
   MessageSquare,
+  Sparkles,
 } from "lucide-react";
 import type { Role } from "@/types/role";
 
@@ -105,6 +106,14 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
     label: "Sales & Records",
     items: [
       {
+        // Ranks available lots against what a family has said they need.
+        // Sits beside Sales because that is the conversation it serves.
+        href: "/lots/suggest",
+        label: "Suggest a lot",
+        icon: Sparkles,
+        requiredRoles: ["admin", "office_staff"],
+      },
+      {
         href: "/customers",
         label: "Customers",
         icon: Users,
@@ -185,6 +194,15 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
         requiredRoles: ["admin", "office_staff"],
       },
       {
+        // Families who have finished paying and have no certificate yet.
+        // A work list, not a dashboard tile — each row is a person owed
+        // a document.
+        href: "/certificates",
+        label: "Certificates",
+        icon: FileText,
+        requiredRoles: ["admin", "office_staff"],
+      },
+      {
         // Story 7.5 — combined consecration + interment calendar.
         href: "/ceremonies/calendar",
         label: "Ceremonies",
@@ -199,6 +217,16 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
         icon: Boxes,
         requiredRoles: ["admin", "office_staff"],
       },
+      {
+        // Inventory analytics — the sales rate measured from contracts,
+        // and the runway that falls out of it. Sits beside Phase
+        // Planning deliberately: the plan's absorption figure is typed
+        // in by hand, and this is where it gets checked.
+        href: "/analytics",
+        label: "Inventory",
+        icon: LineChart,
+        requiredRoles: ["admin", "office_staff"],
+      },
     ],
   },
   {
@@ -208,6 +236,39 @@ export const NAV_GROUPS: ReadonlyArray<NavGroup> = [
         href: "/reports",
         label: "Reports",
         icon: FileBarChart,
+        requiredRoles: ["admin"],
+      },
+      {
+        // What the cemetery charges, and the offers on top. Admin-only:
+        // office staff read plans to fill a sale form and must not be
+        // able to mint one on the way to closing a sale.
+        href: "/admin/settings/payment-plans",
+        label: "Payment plans",
+        icon: Wallet,
+        requiredRoles: ["admin"],
+      },
+      {
+        // The park's own certificate blank and its field placements.
+        // Admin-only: this file becomes every certificate the park
+        // issues, so replacing it is a decision, not a task.
+        href: "/admin/settings/certificate",
+        label: "Certificate",
+        icon: FileText,
+        requiredRoles: ["admin"],
+      },
+      {
+        // Who sells for the park. Admin-only: a staffer who could mint
+        // an agent and set its rate could route commission anywhere.
+        href: "/admin/settings/sales-agents",
+        label: "Sales agents",
+        icon: Users,
+        requiredRoles: ["admin"],
+      },
+      {
+        // What the park owes them. A payroll view, so admin-only.
+        href: "/admin/commissions",
+        label: "Commissions",
+        icon: Wallet,
         requiredRoles: ["admin"],
       },
       {

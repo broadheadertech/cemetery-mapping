@@ -19,6 +19,9 @@
  * The component does NOT render document URLs eagerly — that would
  * burn through audit-log entries (Story 2.3 wraps the URL retrieval
  * with `readPii`). Clicking "View" is the explicit access event.
+ *
+ * @gated-route-only — mounts on `/customers/[customerId]` and its
+ * `/upload` child; middleware keeps field workers off `/customers`.
  */
 
 import { useState } from "react";

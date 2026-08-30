@@ -40,6 +40,7 @@
     "leaflet": "^1.9.4",
     "lucide-react": "^1.16.0",
     "next": "^15.1.0",
+    "pdf-lib": "^1.17.1",
     "pdfkit": "^0.18.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

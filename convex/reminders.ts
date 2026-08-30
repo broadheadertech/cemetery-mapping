@@ -1074,6 +1074,109 @@ export const getBouncedEmailCustomers = queryGeneric({
  * Internal query: invoked by the scheduled action only; no user
  * context to authenticate.
  */
+/**
+ * Tell a family they have finished paying.
+ *
+ * The one message the estate sends that asks for nothing. It rides the
+ * reminder pipeline because opt-out, bounce handling and retries are
+ * the same problem whatever the message says — a second delivery
+ * system would have been a second place for all three to be got wrong.
+ *
+ * Idempotent per contract, forever. A family that has finished paying
+ * should hear so once; hearing it twice reads as a system that does not
+ * know what it has already said. The check is a `by_contract_kind`
+ * lookup inside the mutation, so two payments landing together cannot
+ * both queue one.
+ *
+ * Silent, deliberately, in four cases. No email on file, an opted-out
+ * customer, an address that has already hard-bounced, or a contract not
+ * actually settled. None of them is an error worth failing a payment
+ * over — the office work list on `/certificates` is the path that does
+ * not depend on anybody's inbox.
+ */
+export const internal_enqueuePaidInFull = internalMutationGeneric({
+  args: { contractId: v.id("contracts") },
+  handler: async (
+    ctx: MutationCtx,
+    args: { contractId: ContractDoc["_id"] },
+  ): Promise<{ queued: boolean; reason?: string }> => {
+    const contract = (await ctx.db.get(args.contractId)) as ContractDoc | null;
+    if (contract === null) return { queued: false, reason: "no_contract" };
+    if (contract.state !== "paid_in_full") {
+      return { queued: false, reason: "not_settled" };
+    }
+
+    // Already told them. The index makes this one lookup rather than a
+    // scan, and it is what stops two concurrent payoffs both queueing.
+    const existing = await ctx.db
+      .query("reminderDeliveries")
+      .withIndex("by_contract_kind", (q) =>
+        q
+          .eq("contractId", args.contractId)
+          .eq("kind", "contract_paid_in_full"),
+      )
+      .first();
+    if (existing !== null) return { queued: false, reason: "already_sent" };
+
+    const customer = (await ctx.db.get(
+      contract.customerId,
+    )) as CustomerDoc | null;
+    if (customer === null) return { queued: false, reason: "no_customer" };
+
+    const email =
+      typeof customer.email === "string" && customer.email.length > 0
+        ? customer.email
+        : null;
+    if (email === null) return { queued: false, reason: "no_email" };
+    if (customer.reminderOptOut === true) {
+      return { queued: false, reason: "opted_out" };
+    }
+    if (typeof customer.emailBouncedAt === "number") {
+      return { queued: false, reason: "bounced" };
+    }
+
+    const now = Date.now();
+    const deliveryId = await ctx.db.insert("reminderDeliveries", {
+      customerId: customer._id,
+      contractId: args.contractId,
+      kind: "contract_paid_in_full",
+      channel: "email",
+      templateKey: "paid_in_full_email",
+      // Not driven by a rule. Zero is the honest value for a message
+      // that is not offset from anything.
+      ruleOffset: 0,
+      attempt: 1,
+      status: "queued",
+      scheduledAt: now,
+    } as never);
+
+    // Same dynamic resolution as the daily scan: `_generated/api` is
+    // produced by `npx convex dev`, and until it lands the scheduler
+    // call is a no-op so a typecheck without codegen still passes.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let internalApi: any = null;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      internalApi = require("./_generated/api").internal;
+    } catch {
+      internalApi = null;
+    }
+    if (
+      internalApi !== null &&
+      internalApi.actions !== undefined &&
+      internalApi.actions.sendEmailReminder !== undefined
+    ) {
+      await ctx.scheduler.runAfter(
+        0,
+        internalApi.actions.sendEmailReminder.send,
+        { deliveryId },
+      );
+    }
+
+    return { queued: true };
+  },
+});
+
 export const getDeliveryForSend = internalQueryGeneric({
   args: { deliveryId: v.id("reminderDeliveries") },
   handler: async (
@@ -1097,12 +1200,20 @@ export const getDeliveryForSend = internalQueryGeneric({
       contractId: ContractDoc["_id"];
       contractNumber: string;
     };
+    /**
+     * Null for a delivery that is not about one instalment — the
+     * paid-in-full notice. The action branches on it.
+     */
     installment: {
       installmentId: InstallmentDoc["_id"];
       dueDate: number;
       principalCents: number;
       paidCents: number;
-    };
+    } | null;
+    /** What the message is about. */
+    kind: "installment_due" | "contract_paid_in_full";
+    /** Contract total, for a message about the whole contract. */
+    contractTotalCents: number;
     lotCode: string;
   } | null> => {
     const row = (await ctx.db.get(
@@ -1117,10 +1228,17 @@ export const getDeliveryForSend = internalQueryGeneric({
     if (customer === null) return null;
     const contract = (await ctx.db.get(row.contractId)) as ContractDoc | null;
     if (contract === null) return null;
-    const inst = (await ctx.db.get(
-      row.installmentId,
-    )) as InstallmentDoc | null;
-    if (inst === null) return null;
+    const kind = row.kind ?? "installment_due";
+
+    // A paid-in-full notice has no instalment to point at, and must NOT
+    // meet the paid-skip gate below — by definition everything on the
+    // contract is paid, which is exactly why the message is being sent.
+    let inst: InstallmentDoc | null = null;
+    if (kind === "installment_due") {
+      if (row.installmentId === undefined) return null;
+      inst = (await ctx.db.get(row.installmentId)) as InstallmentDoc | null;
+      if (inst === null) return null;
+    }
     // P0-1 — send-time paid-skip gate. The scan filtered paid rows at
     // scan time, but a payment can land between scan and best-effort
     // `runAfter(0, ...)` action firing (or any of the 4h / 24h
@@ -1129,7 +1247,7 @@ export const getDeliveryForSend = internalQueryGeneric({
     // provider. The wrapper interprets `null` from this query as a
     // no-op and does NOT mark the row as permanent_failure — the row
     // can be left in `queued`; subsequent retries will also no-op.
-    if (inst.status === "paid") {
+    if (inst !== null && inst.status === "paid") {
       return null;
     }
     const lot = await ctx.db.get(contract.lotId);
@@ -1164,12 +1282,17 @@ export const getDeliveryForSend = internalQueryGeneric({
         contractId: contract._id,
         contractNumber: contract.contractNumber,
       },
-      installment: {
-        installmentId: inst._id,
-        dueDate: inst.dueDate,
-        principalCents: inst.principalCents,
-        paidCents: inst.paidCents,
-      },
+      installment:
+        inst === null
+          ? null
+          : {
+              installmentId: inst._id,
+              dueDate: inst.dueDate,
+              principalCents: inst.principalCents,
+              paidCents: inst.paidCents,
+            },
+      kind,
+      contractTotalCents: contract.totalPriceCents,
       lotCode,
     };
   },

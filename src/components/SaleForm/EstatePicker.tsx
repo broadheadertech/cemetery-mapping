@@ -21,6 +21,9 @@
  * re-validate every member lot's status. The picker shows every active
  * estate; the server is the authority on whether the estate can
  * actually be sold today.
+ *
+ * @gated-route-only — renders inside `SaleForm` on `/sales/new`;
+ * middleware keeps field workers off the `/sales` family.
  */
 
 import { useState } from "react";

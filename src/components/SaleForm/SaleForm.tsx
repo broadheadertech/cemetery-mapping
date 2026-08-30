@@ -89,6 +89,16 @@ type RecordFullPaymentSaleArgs = {
   // here is the PRE-perpetual-care total (base − discount).
   // Story 2.9 (FR15) — estate-mode opt-in.
   familyEstateId?: string;
+  // Which offer produced these figures. Ids only — the server takes no
+  // price from a plan; it re-validates the centavo amounts above.
+  paymentPlanId?: string;
+  promoId?: string;
+  // Who to credit. An id only; the commission amount is never sent from
+  // the client — it is money leaving the park.
+  salesAgentId?: string;
+  // Where the sale came from. Optional; without it the conversion
+  // analytics can only report a floor.
+  enquiryId?: string;
 };
 
 interface PreviewPerpetualCareResult {
@@ -97,6 +107,10 @@ interface PreviewPerpetualCareResult {
   isPlaceholder: boolean;
   policyType: "one_time" | "annual" | "none";
 }
+
+import { PlanPicker, type QuoteOption } from "./PlanPicker";
+import { AgentPicker } from "./AgentPicker";
+import { EnquiryPicker } from "./EnquiryPicker";
 
 const previewPerpetualCareRef = makeFunctionReference<
   "query",
@@ -151,6 +165,25 @@ export function SaleForm({ userRoles = [], initialLotId }: SaleFormProps) {
     useState<EstatePickerOption | null>(null);
   const [selectedCustomer, setSelectedCustomer] =
     useState<CustomerPickerOption | null>(null);
+  /**
+   * The offer this sale is being made under, when one was picked.
+   *
+   * Ids only. The figures live in the form fields exactly as they would
+   * if the operator had typed them, and the server re-validates every
+   * one — a plan fills the form, it is not a second way into the money.
+   */
+  const [appliedOffer, setAppliedOffer] = useState<{
+    planId: string;
+    promoId?: string;
+  } | null>(null);
+  /**
+   * Who to credit the sale to. Empty for a walk-in, which is most of
+   * them. The RATE is resolved and frozen server-side; the form sends
+   * an id and never an amount.
+   */
+  const [salesAgentId, setSalesAgentId] = useState("");
+  /** The enquiry this sale came from, when the desk knows of one. */
+  const [enquiryId, setEnquiryId] = useState("");
   const [previewOpen, setPreviewOpen] = useState(false);
   const [isCommitting, setIsCommitting] = useState(false);
   const [commitError, setCommitError] = useState<string | null>(null);
@@ -270,6 +303,10 @@ export function SaleForm({ userRoles = [], initialLotId }: SaleFormProps) {
   function handleLotSelected(lot: LotPickerOption | null): void {
     setSelectedLot(lot);
     setConflictError(null);
+    // The applied offer was priced against the previous lot. Carrying
+    // it over would leave a contract stamped with a plan whose figures
+    // were never quoted for this one.
+    setAppliedOffer(null);
     if (lot !== null) {
       setValue("lotId", lot.lotId, { shouldValidate: true });
       // Auto-fill the price from the lot's listed basePriceCents.
@@ -373,6 +410,24 @@ export function SaleForm({ userRoles = [], initialLotId }: SaleFormProps) {
       // server re-validates membership + sibling-lot availability.
       if (saleMode === "estate" && selectedEstate !== null) {
         args.familyEstateId = selectedEstate.estateId;
+      }
+      // Which offer produced these figures. Recorded so the cemetery
+      // can ask later how many lots an offer actually moved, and so the
+      // promotion's redemption is claimed in the same transaction as
+      // the contract.
+      if (appliedOffer !== null) {
+        args.paymentPlanId = appliedOffer.planId;
+        if (appliedOffer.promoId !== undefined) {
+          args.promoId = appliedOffer.promoId;
+        }
+      }
+      // Who sold it. An id only — the server resolves the rate from the
+      // agent and the park's policy, and freezes both onto the contract.
+      if (salesAgentId.length > 0) {
+        args.salesAgentId = salesAgentId;
+      }
+      if (enquiryId.length > 0) {
+        args.enquiryId = enquiryId;
       }
       // Story 3.8 (FR25) — perpetual care is policy-driven; the server
       // derives the fee from `cemeterySettings.perpetualCarePolicy` at
@@ -545,6 +600,67 @@ export function SaleForm({ userRoles = [], initialLotId }: SaleFormProps) {
               {errors.customerId.message}
             </p>
           )}
+
+          {/*
+            * The cemetery's plans, priced against this lot. Picking one
+            * fills the fields below exactly as typing would; the fields
+            * remain the authority and the server re-validates them.
+            * Estate mode is deliberately excluded — estate pricing is an
+            * admin-discretion call (see `handleEstateSelected`), and a
+            * per-lot plan has nothing sensible to say about it.
+            */}
+          {saleMode === "single" && (
+            <div className="space-y-2">
+              <p className="block text-sm font-medium text-slate-700">
+                Payment plan
+              </p>
+              <PlanPicker
+                lotId={selectedLot?.lotId ?? null}
+                {...(appliedOffer !== null
+                  ? { selectedPlanId: appliedOffer.planId }
+                  : {})}
+                onApply={(option: QuoteOption) => {
+                  // Full-payment plans only on this tab. An instalment
+                  // plan belongs to the other one, and silently applying
+                  // its total here would produce a paid-in-full contract
+                  // at an instalment price.
+                  if (option.kind !== "full_payment") return;
+                  setValue(
+                    "priceInput",
+                    centsToPesos(option.netPriceCents).toFixed(2),
+                    { shouldValidate: true },
+                  );
+                  setAppliedOffer({
+                    planId: option.planId,
+                    ...(option.promoId !== undefined
+                      ? { promoId: option.promoId }
+                      : {}),
+                  });
+                }}
+                onClear={() => {
+                  setAppliedOffer(null);
+                  if (selectedLot !== null) {
+                    setValue(
+                      "priceInput",
+                      centsToPesos(selectedLot.basePriceCents).toFixed(2),
+                      { shouldValidate: true },
+                    );
+                  }
+                }}
+              />
+            </div>
+          )}
+
+          {/* Who to credit. Sits beside the price because that is what
+            * the commission is a share of, and the operator should see
+            * what the park is about to owe before committing. */}
+          <AgentPicker
+            value={salesAgentId}
+            onChange={setSalesAgentId}
+            totalCents={totalWithAddons}
+          />
+
+          <EnquiryPicker value={enquiryId} onChange={setEnquiryId} />
 
           <div className="space-y-1">
             <label

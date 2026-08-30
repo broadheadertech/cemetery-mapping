@@ -46,31 +46,75 @@ interface LotUserData {
   realLotId: string | null;
 }
 
-/** Lot row read from `lots:listLots` to drive the scene from live data. */
+/** Lot row read from `lots:listForMap` — the scene's whole diet. */
 interface RealLotRow {
   _id: string;
   code: string;
   section: string;
   block: string;
-  row: string;
-  type: "single" | "family" | "mausoleum" | "niche";
+  type: string;
   basePriceCents: number;
   status: string;
-  isRetired: boolean;
+  areaSqm: number;
+  hasPhoto: boolean;
 }
 
-const listLotsRef = makeFunctionReference<
+/**
+ * The map's own read.
+ *
+ * `lots:listLots` returned whole lot documents — every field, including
+ * the `geometry` polygon and its bounding box, for every lot in the
+ * park — to draw a few hundred coloured boxes that are positioned on a
+ * grid. `listForMap` returns eight scalars per lot and the garden
+ * layouts, and does the area arithmetic server-side.
+ */
+const listForMapRef = makeFunctionReference<
   "query",
-  Record<string, never>,
-  RealLotRow[]
->("lots:listLots");
+  { sectionNames?: string[] },
+  MapData
+>("lots:listForMap");
 
-/** The `lots.section` names that make up Phase 1 (the Northwest Parcel). */
-const PHASE1_SECTION_NAMES: ReadonlyArray<string> = [
-  "Garden of Grace",
-  "Garden of Faith",
-  "Garden of Hope",
-];
+/** One lot's detail, read only when somebody clicks it. */
+const lotDetailRef = makeFunctionReference<
+  "query",
+  { lotId: string },
+  MapLotDetail | null
+>("lots:getMapLotDetail");
+
+interface MapSectionRow {
+  name: string;
+  displayName: string;
+  sortOrder: number;
+  columns: number;
+  rows: number;
+  tintHex: number | null;
+  lotCount: number;
+  layoutIsDerived: boolean;
+}
+
+interface MapData {
+  sections: MapSectionRow[];
+  lots: RealLotRow[];
+}
+
+export interface MapLotDetail {
+  _id: string;
+  code: string;
+  section: string;
+  block: string;
+  row: string;
+  status: string;
+  type: string;
+  basePriceCents: number;
+  areaSqm: number;
+  widthM: number;
+  depthM: number;
+  lat: number | null;
+  lng: number | null;
+  geometryStatus: string;
+  photoUrl: string | null;
+  photoUpdatedAt: number | null;
+}
 
 /** Map the 7-state lot lifecycle onto the 5 the 3D scene renders. */
 function to3DStatus(s: string): LotStatus {
@@ -178,6 +222,16 @@ export interface ParcelSection {
   mausoleum?: boolean;
 }
 
+/**
+ * Turf greens, cycled for gardens with no colour of their own.
+ *
+ * Close together on purpose: a cemetery map wants to read as one park
+ * seen from above, not as a chart.
+ */
+const DEFAULT_TINTS: ReadonlyArray<number> = [
+  0x8fab7f, 0x86a276, 0x93ad84, 0x8aa77c, 0x97b189,
+];
+
 /** Phase 1's Northwest Parcel — the staff survey's default subject. */
 const DEFAULT_SECTIONS: ReadonlyArray<ParcelSection> = [
   { id: "A", code: "GRACE", name: "Garden of Grace", cols: 5, rows: 5, tint: 0x8fab7f },
@@ -208,11 +262,13 @@ export default function Phase3DMap({
   parcelLabel = "Phase 1 · Northwest Parcel",
 }: Phase3DMapProps = {}) {
   const isPublic = variant === "public";
-  const parcelSections = sectionsProp ?? DEFAULT_SECTIONS;
   const stageRef = useRef<HTMLDivElement | null>(null);
   const apiRef = useRef<MapApi | null>(null);
 
   const [selected, setSelected] = useState<LotUserData | null>(null);
+  // Only a lot that came from live inventory has a record to read; the
+  // illustrative parcel's lots are procedural and have none.
+  const selectedRealId = selected?.realLotId ?? null;
   const [rollup, setRollup] = useState<Rollup | null>(null);
   const [filter, setFilter] = useState<string>("all");
   const [autoRotate, setAutoRotate] = useState(false);
@@ -229,15 +285,57 @@ export default function Phase3DMap({
   // `"skip"` keeps the hook call unconditional while leaving the
   // subscription dormant — the public site has no session, and this
   // query is role-gated, so running it would only ever throw.
-  const lotsQuery = useQuery(listLotsRef, isPublic ? "skip" : {});
+  const mapQuery = useQuery(listForMapRef, isPublic ? "skip" : {});
   const realLots = useMemo<RealLotRow[] | null>(() => {
     // Empty, not null: null means "still loading" and holds the scene
     // back. The public view has nothing to wait for.
     if (isPublic) return [];
-    if (lotsQuery === undefined) return null;
-    const names = new Set(PHASE1_SECTION_NAMES);
-    return lotsQuery.filter((l) => !l.isRetired && names.has(l.section));
-  }, [isPublic, lotsQuery]);
+    if (mapQuery === undefined) return null;
+    return mapQuery.lots;
+  }, [isPublic, mapQuery]);
+
+  /**
+   * The gardens to draw, and how.
+   *
+   * Taken from the sections registry rather than the hardcoded three,
+   * so adding a garden is a record somebody creates rather than a
+   * deployment. The `DEFAULT_SECTIONS` constant survives only as the
+   * illustrative parcel for the public site, which has no session and
+   * therefore no inventory to read.
+   */
+  const liveSections = useMemo<ReadonlyArray<ParcelSection> | null>(() => {
+    if (isPublic) return null;
+    if (mapQuery === undefined) return null;
+    if (mapQuery.sections.length === 0) return null;
+    return mapQuery.sections.map((sec, i) => ({
+      id: String.fromCharCode(65 + (i % 26)),
+      code: sec.name.replace(/[^A-Za-z]/g, "").slice(-5).toUpperCase(),
+      name: sec.name,
+      cols: sec.columns,
+      rows: sec.rows,
+      tint: sec.tintHex ?? DEFAULT_TINTS[i % DEFAULT_TINTS.length]!,
+    }));
+  }, [isPublic, mapQuery]);
+
+  /**
+   * The selected lot's detail, read only when something is selected.
+   *
+   * Deliberately a second query. A photograph URL and a coordinate pair
+   * per lot, fetched for the whole park to draw boxes, would undo the
+   * point of the light list above.
+   */
+  const detail = useQuery(
+    lotDetailRef,
+    selectedRealId === null ? "skip" : { lotId: selectedRealId },
+  );
+
+  /** True when at least one garden is being drawn on a guessed grid. */
+  const anyDerivedLayout = useMemo(
+    () =>
+      mapQuery !== undefined &&
+      mapQuery.sections.some((sec) => sec.layoutIsDerived),
+    [mapQuery],
+  );
   // Rebuild the scene only when the meaningful lot set changes (ids +
   // statuses), not on every query echo.
   const sceneSignature = useMemo(() => {
@@ -250,6 +348,17 @@ export default function Phase3DMap({
   }, [realLots]);
   const realDataRef = useRef<RealLotRow[] | null>(realLots);
   realDataRef.current = realLots;
+  /**
+   * What the scene actually draws.
+   *
+   * An explicit `sections` prop wins — that is how the public site asks
+   * for the illustrative parcel. Otherwise the live registry, and only
+   * if there is nothing there at all does it fall back to the
+   * hardcoded three.
+   */
+  const parcelSections: ReadonlyArray<ParcelSection> =
+    sectionsProp ?? liveSections ?? DEFAULT_SECTIONS;
+
   const sectionsRef = useRef<ReadonlyArray<ParcelSection>>(parcelSections);
   sectionsRef.current = parcelSections;
   // A different parcel is a different scene, so fold it into the
@@ -1058,12 +1167,25 @@ export default function Phase3DMap({
 
       {/* Rail */}
       <aside className="overflow-y-auto border-t border-surface-border p-6 lg:border-l lg:border-t-0">
+        {anyDerivedLayout && !isDemo && !isPublic && (
+          <div
+            data-testid="derived-layout-note"
+            className="mb-4 rounded-md border border-surface-border bg-surface-muted px-3 py-2 text-[11px] leading-snug text-text-muted"
+          >
+            <strong className="font-semibold text-text-default">
+              Layout guessed.
+            </strong>{" "}
+            At least one garden has no arrangement set, so it is drawn on
+            a square-ish grid sized to its lots. Set the columns and rows
+            on the section to draw it as it actually sits.
+          </div>
+        )}
         {isDemo && !isPublic && (
           <div className="mb-4 rounded-md border border-status-reserved-border/40 bg-status-reserved-bg px-3 py-2 text-[11px] leading-snug text-status-reserved-text">
             <strong className="font-semibold">Demonstration layout.</strong> No
-            Phase&nbsp;1 lots are loaded yet — this is illustrative. Create lots
-            in the Grace / Faith / Hope gardens (and import GPS geometry) to see
-            the real parcel here.
+            lots are loaded yet, so this is illustrative. Create lots in a
+            garden and they appear here — the map draws them in code
+            order, so the codes are the arrangement.
           </div>
         )}
         {selected ? (
@@ -1084,11 +1206,74 @@ export default function Phase3DMap({
             <dl className="mt-5 grid grid-cols-2">
               <Fact label="Type" value={cap(selected.type)} />
               <Fact label="Status" value={cap(selected.status)} />
-              <Fact label="Dimensions" value={dims} />
+              <Fact
+                label="Dimensions"
+                value={
+                  detail
+                    ? `${detail.widthM}m × ${detail.depthM}m`
+                    : dims
+                }
+              />
+              <Fact
+                label="Area"
+                value={detail ? `${detail.areaSqm} sqm` : "—"}
+              />
               <Fact label="Capacity" value={capacity} />
               <Fact label="Base price" value={peso(selected.price)} />
-              <Fact label="GPS" value="14.06° N" />
             </dl>
+
+            {/*
+              Where it actually is. A placeholder centroid is a stand-in
+              written at lot creation, not a position anybody measured —
+              the server refuses to hand one over, and this says so
+              rather than printing a number that would send somebody to
+              the wrong part of the park.
+            */}
+            {detail && (
+              <div
+                data-testid="lot-location"
+                className="mt-4 rounded-md border border-surface-border bg-surface-muted px-3 py-2"
+              >
+                <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-text-muted">
+                  Location
+                </div>
+                {detail.lat !== null && detail.lng !== null ? (
+                  <div className="mt-1 font-mono text-xs text-text-default">
+                    {detail.lat.toFixed(6)}, {detail.lng.toFixed(6)}
+                  </div>
+                ) : (
+                  <div className="mt-1 text-xs text-text-muted">
+                    Not surveyed yet — this lot has no measured position,
+                    only its place in {selected.section}, block{" "}
+                    {selected.block}.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/*
+              A photograph is what a family recognises and what settles
+              "is this the one by the tree". It is the survey that a park
+              this size actually needs.
+            */}
+            {detail?.photoUrl != null && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={detail.photoUrl}
+                alt={`Lot ${selected.code}`}
+                data-testid="lot-photo"
+                className="mt-4 w-full rounded-md border border-surface-border object-cover"
+              />
+            )}
+            {detail !== undefined && detail !== null && detail.photoUrl === null && !isPublic && (
+              <p
+                data-testid="lot-photo-missing"
+                className="mt-4 rounded-md border border-dashed border-surface-border px-3 py-2 text-xs text-text-muted"
+              >
+                No photograph yet. Adding one from the lot page is the
+                quickest way to make this lot findable on the ground.
+              </p>
+            )}
 
             {selected.occupant && (
               <div className="mt-5 rounded-lg border border-surface-border bg-surface-muted p-4 text-center">

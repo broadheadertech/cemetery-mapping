@@ -340,9 +340,13 @@ export const requestExport = mutationGeneric({
       scheduledAt: now,
     });
 
-    // Schedule the action immediately. The action's own auth-chain
-    // (it calls back into the report query, which requireRole-s the
-    // admin caller) is the defense-in-depth.
+    // Schedule the renderer. THIS mutation is the authorisation point —
+    // it is `requireRole(["admin"])` and runs with the caller's
+    // identity. The scheduled action has none, which is why it reads
+    // through internal queries rather than the public report ones; the
+    // note here used to claim an "auth-chain" back through them, and
+    // that was simply wrong about how a scheduled action authenticates.
+    // Every export failed on it.
     await ctx.scheduler.runAfter(0, generateReportExportRef, {
       exportId: exportId as unknown as string,
     });
