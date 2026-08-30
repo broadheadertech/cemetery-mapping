@@ -61,6 +61,15 @@ import {
 import { transitionLotStatus } from "./lib/stateMachines";
 import { LOT_STATUSES, type LotStatus } from "./lib/states";
 import { DEFAULT_CAPACITY_UNITS } from "./lib/lotCapacity";
+import { layoutRow } from "./lib/rowLayout";
+
+/**
+ * The most lots one drawn line may place.
+ *
+ * A row, not a garden. Past this the line is almost certainly a mistake
+ * — and every lot in it is a document write and an audit row.
+ */
+const MAX_ROW_LOTS = 200;
 
 type DataModel = DataModelFromSchemaDefinition<typeof schema>;
 type LotDoc = DataModel["lots"]["document"];
@@ -1849,5 +1858,178 @@ export const clearLotLocation = mutationGeneric({
       },
       after: { geometryStatus: "placeholder" },
     });
+  },
+});
+
+/**
+ * Place a whole row of lots along a line somebody drew.
+ *
+ * The practical way to map an irregular park by hand. A cemetery is
+ * rows of near-identical plots, so the useful unit of work is not one
+ * lot — it is "this row, from here to here". Two clicks place twenty
+ * graves at real coordinates, at the real angle the row runs, which no
+ * grid can express and which twenty separate GPS captures would take an
+ * afternoon to collect.
+ *
+ * The lots keep their own recorded widths: the drawn line supplies the
+ * row's START and BEARING, not its spacing. Stretching plots to fill
+ * whatever line got drawn would always look tidy and would make the map
+ * misstate how big a grave is.
+ *
+ * Order matters and is the caller's: `lotIds` are laid out in the order
+ * given, which is the order they will sit on the ground.
+ */
+export const placeLotRow = mutationGeneric({
+  args: {
+    lotIds: v.array(v.id("lots")),
+    start: v.object({ lat: v.number(), lng: v.number() }),
+    end: v.object({ lat: v.number(), lng: v.number() }),
+  },
+  handler: async (
+    ctx: MutationCtx,
+    args: {
+      lotIds: LotId[];
+      start: { lat: number; lng: number };
+      end: { lat: number; lng: number };
+    },
+  ): Promise<{ placed: number }> => {
+    await requireRole(ctx, ["admin", "office_staff"]);
+
+    if (args.lotIds.length === 0) {
+      throwError(ErrorCode.VALIDATION, "Choose at least one lot to place.", {});
+    }
+    if (args.lotIds.length > MAX_ROW_LOTS) {
+      throwError(
+        ErrorCode.VALIDATION,
+        `That is ${args.lotIds.length} lots in one row. Rows are drawn a row at a time — split it.`,
+        { given: args.lotIds.length },
+      );
+    }
+    for (const p of [args.start, args.end]) {
+      if (!isCoordInManilaSanityRange(p)) {
+        throwError(
+          ErrorCode.VALIDATION,
+          "That line is outside the cemetery's coordinate range — check where you drew it.",
+          { lat: p.lat, lng: p.lng },
+        );
+      }
+    }
+
+    // Duplicates would place the same lot twice and silently drop
+    // another from the row.
+    if (new Set(args.lotIds).size !== args.lotIds.length) {
+      throwError(
+        ErrorCode.VALIDATION,
+        "The same lot appears twice in that row.",
+        {},
+      );
+    }
+
+    const lots = [];
+    for (const id of args.lotIds) {
+      const lot = await ctx.db.get(id);
+      if (lot === null) {
+        throwError(ErrorCode.NOT_FOUND, "One of those lots is not there.", {
+          lotId: id,
+        });
+      }
+      if (lot.isRetired) {
+        throwError(
+          ErrorCode.VALIDATION,
+          `Lot ${lot.code} is retired and cannot be placed.`,
+          { lotId: id },
+        );
+      }
+      lots.push(lot);
+    }
+
+    const layout = layoutRow(
+      args.start,
+      args.end,
+      lots.map((l) => l.dimensions),
+    );
+
+    const now = Date.now();
+    for (let i = 0; i < lots.length; i++) {
+      const lot = lots[i]!;
+      const place = layout.placements[i]!;
+      // Every corner is checked, not just the line's ends: a row drawn
+      // at the very edge of the park can put a plot outside it.
+      assertPolygonValid(place.polygon);
+      const bbox = bboxFromPolygon(place.polygon, place.centroid);
+
+      await ctx.db.patch(lot._id, {
+        geometry: { centroid: place.centroid, polygon: place.polygon, ...bbox },
+        geometryStatus: "surveyed",
+        geometrySource: "drawn",
+        geometryCapturedAt: now,
+        geometryAccuracyM: undefined,
+      });
+
+      await emitAudit(ctx, {
+        action: "update",
+        entityType: "lot",
+        entityId: lot._id,
+        before: {
+          geometryStatus: lot.geometryStatus,
+          geometrySource: lot.geometrySource ?? null,
+        },
+        after: {
+          geometryStatus: "surveyed",
+          geometrySource: "drawn",
+          rowPosition: i + 1,
+        },
+      });
+    }
+
+    return { placed: lots.length };
+  },
+});
+
+/**
+ * Every lot in one garden, in code order, with whether it is placed.
+ *
+ * What the row-drawing screen picks from. Code order because that is the
+ * order a row runs — somebody drawing "A-1-01 through A-1-20" is
+ * selecting a contiguous run, and any other ordering makes that
+ * selection meaningless.
+ */
+export interface RowCandidate {
+  _id: LotId;
+  code: string;
+  block: string;
+  row: string;
+  status: string;
+  type: string;
+  widthM: number;
+  depthM: number;
+  placed: boolean;
+  /** How it was placed, when it has been. */
+  source: string | null;
+}
+
+export const listForRowDrawing = queryGeneric({
+  args: { sectionName: v.string() },
+  handler: async (
+    ctx: QueryCtx,
+    args: { sectionName: string },
+  ): Promise<RowCandidate[]> => {
+    await requireRole(ctx, ["admin", "office_staff"]);
+
+    return (await ctx.db.query("lots").collect())
+      .filter((l) => !l.isRetired && l.section === args.sectionName)
+      .sort((a, b) => a.code.localeCompare(b.code))
+      .map((l) => ({
+        _id: l._id,
+        code: l.code,
+        block: l.block,
+        row: l.row,
+        status: l.status,
+        type: l.type,
+        widthM: l.dimensions.widthM,
+        depthM: l.dimensions.depthM,
+        placed: l.geometryStatus === "surveyed",
+        source: l.geometrySource ?? null,
+      }));
   },
 });

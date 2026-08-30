@@ -342,6 +342,11 @@ export default defineSchema({
         v.literal("imported"),
         v.literal("clicked"),
         v.literal("gps"),
+        // Laid out along a row somebody drew on the map. The bearing
+        // is real — it came from the drawn line — and the spacing is
+        // the lots' own recorded widths, but nobody stood at any of
+        // these plots.
+        v.literal("drawn"),
       ),
     ),
     /**

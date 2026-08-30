@@ -289,6 +289,20 @@ export default function AdminSectionsPage() {
                             ? "Map outline: not traced"
                             : `Map outline: ${s.boundary.length} corners`}
                         </a>
+                        {/*
+                          Laying the lots out by drawing their rows —
+                          the only tool here that scales to a whole
+                          park. Sits beside the outline because they are
+                          the same afternoon's work: trace the garden,
+                          then draw its rows inside it.
+                        */}
+                        <a
+                          href={`/admin/sections/${s._id}/draw`}
+                          data-testid="section-draw-link"
+                          className="ml-3 mt-2 inline-block text-xs font-medium text-slate-600 underline hover:text-slate-900"
+                        >
+                          Draw rows of lots
+                        </a>
                         <SectionLayoutControl
                           sectionId={s._id}
                           displayName={s.displayName}
