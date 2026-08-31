@@ -27,10 +27,8 @@ import {
   blockedReason,
   canSave as fixIsUsable,
   qualityOf,
-  SAMPLE_WINDOW_MS,
-  summarise,
-  type GpsSample,
 } from "@/lib/gpsCapture";
+import { useGpsCapture } from "@/hooks/useGpsCapture";
 
 interface Point {
   lat: number;
@@ -75,12 +73,16 @@ export function SectionBoundaryEditor({
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // GPS corner capture.
-  const [sampling, setSampling] = useState(false);
-  const [samples, setSamples] = useState<GpsSample[]>([]);
-  const [remainingMs, setRemainingMs] = useState(SAMPLE_WINDOW_MS);
-  const watchRef = useRef<number | null>(null);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /*
+   * Corner capture, on the same shared lifecycle as the lot panel.
+   *
+   * This screen had its own copy, with the same three bugs: a
+   * fifteen-second per-acquisition timeout that a cold GPS cannot
+   * meet, a countdown that started before the first fix instead of
+   * with it, and an abort on every error including the routine ones.
+   */
+  const gps = useGpsCapture();
+  const [pendingCorner, setPendingCorner] = useState(false);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<unknown>(null);
@@ -89,18 +91,6 @@ export function SectionBoundaryEditor({
 
   const cornersRef = useRef(corners);
   cornersRef.current = corners;
-
-  function stopWatching(): void {
-    if (watchRef.current !== null) {
-      navigator.geolocation.clearWatch(watchRef.current);
-      watchRef.current = null;
-    }
-    if (timerRef.current !== null) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-  }
-  useEffect(() => stopWatching, []);
 
   // --- the map ---------------------------------------------------------
   useEffect(() => {
@@ -202,79 +192,47 @@ export function SectionBoundaryEditor({
     };
   }, [corners, ready]);
 
-  // --- a corner from the phone -----------------------------------------
+  /*
+   * A corner from the phone.
+   *
+   * The capture runs on the shared hook; this only decides what to do
+   * with the result. `pendingCorner` marks that a capture in flight is
+   * meant to become a corner, so a reading is never silently appended
+   * twice or appended after the person moved on.
+   */
   function captureCorner(): void {
     setError(null);
-    setSamples([]);
-    setRemainingMs(SAMPLE_WINDOW_MS);
+    setPendingCorner(true);
+    gps.start();
+  }
 
-    if (
-      typeof navigator === "undefined" ||
-      navigator.geolocation === undefined
-    ) {
+  useEffect(() => {
+    if (!pendingCorner || gps.phase !== "done") return;
+    setPendingCorner(false);
+
+    const fix = gps.fix;
+    if (!fixIsUsable(fix) || fix === null) {
       setError(
-        "This device cannot report its position. On a phone, check location is on — and that the site is opened over https, which the browser requires before it will share one.",
+        blockedReason(fix) ??
+          "That reading was not good enough to place a corner.",
       );
+      gps.reset();
       return;
     }
 
-    setSampling(true);
-    const startedAt = Date.now();
+    setCorners((prev) => [...prev, { lat: fix.lat, lng: fix.lng }]);
+    setSaved(false);
+    const map = mapRef.current as {
+      setView?: (c: [number, number], z: number) => void;
+    } | null;
+    map?.setView?.([fix.lat, fix.lng], 19);
+    gps.reset();
+  }, [pendingCorner, gps]);
 
-    watchRef.current = navigator.geolocation.watchPosition(
-      (pos) => {
-        setSamples((prev) => [
-          ...prev,
-          {
-            lat: pos.coords.latitude,
-            lng: pos.coords.longitude,
-            accuracyM: pos.coords.accuracy,
-            at: pos.timestamp,
-          },
-        ]);
-      },
-      () => {
-        stopWatching();
-        setSampling(false);
-        setError(
-          "The phone could not get a fix. Step into the open, away from walls and trees, and try again.",
-        );
-      },
-      { enableHighAccuracy: true, maximumAge: 0, timeout: SAMPLE_WINDOW_MS },
-    );
-
-    timerRef.current = setInterval(() => {
-      const left = SAMPLE_WINDOW_MS - (Date.now() - startedAt);
-      setRemainingMs(Math.max(0, left));
-      if (left > 0) return;
-
-      stopWatching();
-      setSampling(false);
-      // Read through the ref: this closure was made before any sample
-      // arrived, so `samples` here would be the empty array it started
-      // with.
-      setSamples((current) => {
-        const fix = summarise(current);
-        if (!fixIsUsable(fix) || fix === null) {
-          setError(
-            blockedReason(fix) ??
-              "That reading was not good enough to place a corner.",
-          );
-          return current;
-        }
-        setCorners((prev) => [...prev, { lat: fix.lat, lng: fix.lng }]);
-        setSaved(false);
-        const map = mapRef.current as {
-          setView?: (c: [number, number], z: number) => void;
-        } | null;
-        map?.setView?.([fix.lat, fix.lng], 19);
-        return current;
-      });
-    }, 250);
-  }
-
-  const liveFix = summarise(samples);
+  const liveFix = gps.fix;
   const enough = corners.length >= MIN_CORNERS;
+  /** A capture is in flight; every control that would disturb it waits. */
+  const busy = gps.phase === "locating" || gps.phase === "sampling";
 
   async function handleSave(): Promise<void> {
     setSaving(true);
@@ -325,7 +283,7 @@ export function SectionBoundaryEditor({
         </span>
         <button
           type="button"
-          disabled={corners.length === 0 || sampling}
+          disabled={corners.length === 0 || busy}
           data-testid="boundary-undo"
           onClick={() => {
             setCorners((prev) => prev.slice(0, -1));
@@ -337,7 +295,7 @@ export function SectionBoundaryEditor({
         </button>
         <button
           type="button"
-          disabled={corners.length === 0 || sampling}
+          disabled={corners.length === 0 || busy}
           data-testid="boundary-reset"
           onClick={() => {
             setCorners([]);
@@ -349,18 +307,20 @@ export function SectionBoundaryEditor({
         </button>
         <button
           type="button"
-          disabled={sampling}
+          disabled={busy}
           data-testid="boundary-gps"
           onClick={captureCorner}
           className="min-h-[38px] rounded-md border border-surface-border px-3 py-1.5 text-sm font-medium text-text-default disabled:text-text-muted"
         >
-          {sampling
-            ? `Holding still… ${Math.ceil(remainingMs / 1000)}s`
-            : "Add corner from my location"}
+          {gps.phase === "locating"
+            ? `Finding satellites… ${Math.round(gps.waitedMs / 1000)}s`
+            : gps.phase === "sampling"
+              ? `Holding still… ${Math.ceil(gps.remainingMs / 1000)}s`
+              : "Add corner from my location"}
         </button>
       </div>
 
-      {sampling && liveFix !== null && (
+      {busy && liveFix !== null && (
         <p data-testid="boundary-gps-reading" className="text-xs text-text-muted">
           ±{Math.round(liveFix.accuracyM)}m &middot;{" "}
           {qualityOf(liveFix.accuracyM).quality} &middot; {liveFix.usedCount}{" "}
@@ -368,13 +328,13 @@ export function SectionBoundaryEditor({
         </p>
       )}
 
-      {error !== null && (
+      {(error ?? gps.error) !== null && (
         <p
           role="alert"
           data-testid="boundary-error"
           className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
         >
-          {error}
+          {error ?? gps.error}
         </p>
       )}
 
@@ -391,7 +351,7 @@ export function SectionBoundaryEditor({
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
-          disabled={!enough || saving || sampling}
+          disabled={!enough || saving || busy}
           data-testid="boundary-save"
           onClick={() => void handleSave()}
           className="min-h-[44px] rounded-md bg-primary px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-300"
@@ -401,7 +361,7 @@ export function SectionBoundaryEditor({
         {initial !== null && (
           <button
             type="button"
-            disabled={saving || sampling}
+            disabled={saving || busy}
             data-testid="boundary-clear"
             onClick={() => {
               setError(null);

@@ -94,6 +94,7 @@ import type * as lib_receiptCounter from "../lib/receiptCounter.js";
 import type * as lib_receiptCounterTesting from "../lib/receiptCounterTesting.js";
 import type * as lib_reminderTemplates from "../lib/reminderTemplates.js";
 import type * as lib_roman from "../lib/roman.js";
+import type * as lib_rowLayout from "../lib/rowLayout.js";
 import type * as lib_scheduling from "../lib/scheduling.js";
 import type * as lib_seedBirReceiptConfig from "../lib/seedBirReceiptConfig.js";
 import type * as lib_stateMachines from "../lib/stateMachines.js";
@@ -219,6 +220,7 @@ declare const fullApi: ApiFromModules<{
   "lib/receiptCounterTesting": typeof lib_receiptCounterTesting;
   "lib/reminderTemplates": typeof lib_reminderTemplates;
   "lib/roman": typeof lib_roman;
+  "lib/rowLayout": typeof lib_rowLayout;
   "lib/scheduling": typeof lib_scheduling;
   "lib/seedBirReceiptConfig": typeof lib_seedBirReceiptConfig;
   "lib/stateMachines": typeof lib_stateMachines;

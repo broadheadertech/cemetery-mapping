@@ -4,8 +4,8 @@
  * Capturing a lot's position by standing at it.
  *
  * The thing a field worker actually holds. No map to pan, no
- * coordinates to type: walk to the grave, press a button, keep still
- * for fifteen seconds, save.
+ * coordinates to type: walk to the grave, press a button, keep still,
+ * save.
  *
  * The whole design problem is that a phone is not accurate enough for
  * what it is being asked to do. A grave is 2.5m wide; a phone reports
@@ -14,16 +14,17 @@
  * is worth keeping, expressed in the unit the person is standing in —
  * graves, not metres — and refuses to save what it cannot support.
  *
- * The arithmetic lives in `@/lib/gpsCapture`, where it can be checked
- * against numbers. This is the part that talks to the device and to the
- * person.
+ * The device lifecycle lives in `@/hooks/useGpsCapture`, shared with
+ * the garden-outline editor: both had their own copy and both copies
+ * carried the same three bugs, one of which made a cold GPS start fail
+ * every single time.
  *
  * @gated-route-only — mounts on `/lots/[lotId]`, which field workers
  * use; `lots:setLotLocation` admits them for `gps` captures only and
  * re-checks the accuracy server-side.
  */
 
-import { useEffect, useRef, useState, type ReactElement } from "react";
+import { useState, type ReactElement } from "react";
 import { useMutation } from "convex/react";
 import { makeFunctionReference } from "convex/server";
 
@@ -33,10 +34,8 @@ import {
   MAX_USABLE_ACCURACY_M,
   qualityOf,
   SAMPLE_WINDOW_MS,
-  summarise,
-  type GpsFix,
-  type GpsSample,
 } from "@/lib/gpsCapture";
+import { useGpsCapture } from "@/hooks/useGpsCapture";
 import { translateError } from "@/lib/errors";
 
 const setLocationRef = makeFunctionReference<
@@ -72,8 +71,6 @@ export interface LotGpsCaptureProps {
   canClear?: boolean;
 }
 
-type Phase = "idle" | "sampling" | "done" | "saved";
-
 export function LotGpsCapture({
   lotId,
   lotCode,
@@ -82,92 +79,24 @@ export function LotGpsCapture({
 }: LotGpsCaptureProps): ReactElement {
   const setLocation = useMutation(setLocationRef);
   const clearLocation = useMutation(clearLocationRef);
+  const gps = useGpsCapture();
+
+  const [saving, setSaving] = useState(false);
+  const [savedAccuracyM, setSavedAccuracyM] = useState<number | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [clearing, setClearing] = useState(false);
   const [cleared, setCleared] = useState(false);
 
-  const [phase, setPhase] = useState<Phase>("idle");
-  const [samples, setSamples] = useState<GpsSample[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [remainingMs, setRemainingMs] = useState(SAMPLE_WINDOW_MS);
-
-  const watchRef = useRef<number | null>(null);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  function stopWatching(): void {
-    if (watchRef.current !== null) {
-      navigator.geolocation.clearWatch(watchRef.current);
-      watchRef.current = null;
-    }
-    if (timerRef.current !== null) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-  }
-
-  // A watch left running drains a field worker's battery for the rest
-  // of their shift.
-  useEffect(() => stopWatching, []);
-
-  function start(): void {
-    setError(null);
-    setSamples([]);
-    setRemainingMs(SAMPLE_WINDOW_MS);
-
-    if (
-      typeof navigator === "undefined" ||
-      navigator.geolocation === undefined
-    ) {
-      setError(
-        "This device cannot report its position. On a phone, check that location is switched on — and that the site is opened over https, which the browser requires before it will share a position at all.",
-      );
-      return;
-    }
-
-    setPhase("sampling");
-    const startedAt = Date.now();
-
-    watchRef.current = navigator.geolocation.watchPosition(
-      (pos) => {
-        setSamples((prev) => [
-          ...prev,
-          {
-            lat: pos.coords.latitude,
-            lng: pos.coords.longitude,
-            accuracyM: pos.coords.accuracy,
-            at: pos.timestamp,
-          },
-        ]);
-      },
-      (err) => {
-        stopWatching();
-        setPhase("idle");
-        setError(messageForGeolocationError(err));
-      },
-      // The whole point is the accurate fix; a cached one from an hour
-      // ago is worse than useless when the question is which grave.
-      { enableHighAccuracy: true, maximumAge: 0, timeout: SAMPLE_WINDOW_MS },
-    );
-
-    timerRef.current = setInterval(() => {
-      const left = SAMPLE_WINDOW_MS - (Date.now() - startedAt);
-      setRemainingMs(Math.max(0, left));
-      if (left <= 0) {
-        stopWatching();
-        setPhase("done");
-      }
-    }, 250);
-  }
-
-  const fix: GpsFix | null = summarise(samples);
+  const { phase, samples, fix, remainingMs, waitedMs } = gps;
   const band = fix === null ? null : qualityOf(fix.accuracyM);
-  const saveable = phase !== "sampling" && canSave(fix);
+  const saveable = phase === "done" && canSave(fix);
   const blocked = phase === "done" ? blockedReason(fix) : null;
+  const error = saveError ?? gps.error;
 
   async function handleSave(): Promise<void> {
     if (fix === null) return;
     setSaving(true);
-    setError(null);
+    setSaveError(null);
     try {
       await setLocation({
         lotId,
@@ -176,9 +105,10 @@ export function LotGpsCapture({
         source: "gps",
         accuracyM: fix.accuracyM,
       });
-      setPhase("saved");
+      setSavedAccuracyM(fix.accuracyM);
+      gps.reset();
     } catch (e: unknown) {
-      setError(translateError(e).detail);
+      setSaveError(translateError(e).detail);
     } finally {
       setSaving(false);
     }
@@ -192,10 +122,11 @@ export function LotGpsCapture({
       <h2 className="font-display text-xl font-light">Capture position</h2>
       <p className="mt-1 text-sm text-slate-600">
         Stand at lot {lotCode} and hold still. The reading settles over{" "}
-        {Math.round(SAMPLE_WINDOW_MS / 1000)} seconds.
+        {Math.round(SAMPLE_WINDOW_MS / 1000)} seconds once the phone has
+        found itself.
       </p>
 
-      {alreadyPlaced && phase === "idle" && (
+      {alreadyPlaced && phase === "idle" && savedAccuracyM === null && (
         <p className="mt-2 text-xs text-slate-500">
           This lot already has a position. Capturing replaces it.
         </p>
@@ -205,11 +136,34 @@ export function LotGpsCapture({
         <button
           type="button"
           data-testid="gps-start"
-          onClick={start}
+          onClick={() => {
+            setSaveError(null);
+            setSavedAccuracyM(null);
+            gps.start();
+          }}
           className="mt-4 min-h-[44px] rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
         >
           Use my location
         </button>
+      )}
+
+      {/*
+        Waiting for the first fix, which is its own state and not a
+        failure. A cold GPS routinely takes half a minute; the previous
+        version treated that as a timeout and gave up before a single
+        reading had arrived.
+      */}
+      {phase === "locating" && (
+        <div className="mt-4 space-y-2" data-testid="gps-locating">
+          <p className="text-sm text-slate-700">
+            Finding the satellites&hellip; {Math.round(waitedMs / 1000)}s
+          </p>
+          <p className="text-xs text-slate-500">
+            The first fix can take up to a minute, especially indoors or
+            the first time today. Standing in the open makes it much
+            faster.
+          </p>
+        </div>
       )}
 
       {phase === "sampling" && (
@@ -223,10 +177,7 @@ export function LotGpsCapture({
           <button
             type="button"
             data-testid="gps-stop"
-            onClick={() => {
-              stopWatching();
-              setPhase("done");
-            }}
+            onClick={gps.finish}
             className="min-h-[44px] rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700"
           >
             Stop now
@@ -305,7 +256,7 @@ export function LotGpsCapture({
           <button
             type="button"
             data-testid="gps-retry"
-            onClick={start}
+            onClick={gps.start}
             className="min-h-[44px] rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700"
           >
             Try again
@@ -313,13 +264,13 @@ export function LotGpsCapture({
         </div>
       )}
 
-      {phase === "saved" && fix !== null && (
+      {savedAccuracyM !== null && (
         <p
           role="status"
           data-testid="gps-saved"
           className="mt-4 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900"
         >
-          Saved, accurate to about {Math.round(fix.accuracyM)}m. The map
+          Saved, accurate to about {Math.round(savedAccuracyM)}m. The map
           shows this as a phone reading rather than a survey.
         </p>
       )}
@@ -348,10 +299,10 @@ export function LotGpsCapture({
             data-testid="gps-clear"
             onClick={() => {
               setClearing(true);
-              setError(null);
+              setSaveError(null);
               void clearLocation({ lotId })
                 .then(() => setCleared(true))
-                .catch((e: unknown) => setError(translateError(e).detail))
+                .catch((e: unknown) => setSaveError(translateError(e).detail))
                 .finally(() => setClearing(false));
             }}
             className="text-xs font-medium text-slate-600 underline hover:text-slate-900 disabled:text-slate-400"
@@ -384,18 +335,4 @@ export function LotGpsCapture({
       </p>
     </section>
   );
-}
-
-/** The browser's failures, in words that say what to do about them. */
-function messageForGeolocationError(err: GeolocationPositionError): string {
-  switch (err.code) {
-    case 1: // PERMISSION_DENIED
-      return "Location permission was refused. Allow it for this site in your browser settings, then try again.";
-    case 2: // POSITION_UNAVAILABLE
-      return "The phone could not get a fix. Step into the open, away from walls and trees, and try again.";
-    case 3: // TIMEOUT
-      return "The phone took too long to find a position. Try again in the open.";
-    default:
-      return "Could not read a position from this device.";
-  }
 }

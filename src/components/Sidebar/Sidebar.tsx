@@ -79,7 +79,7 @@ export function Sidebar({
         )}
       >
         <Image
-          src="/brand/mark.svg"
+          src="/brand/mark.png"
           alt=""
           width={32}
           height={32}

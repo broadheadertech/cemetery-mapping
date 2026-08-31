@@ -128,7 +128,7 @@ export default function AcceptInvitePage() {
       <div className="w-full max-w-md rounded-md border border-surface-border bg-surface-base p-8 shadow-sm">
         <div className="flex flex-col items-center pb-6">
           <Image
-            src="/brand/mark.svg"
+            src="/brand/mark.png"
             alt=""
             width={72}
             height={72}
