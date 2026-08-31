@@ -69,7 +69,13 @@ function fakeDevice() {
 
   const geolocation = {
     watchPosition: vi.fn(
-      (ok: (p: unknown) => void, fail: (e: unknown) => void) => {
+      (
+        ok: (p: unknown) => void,
+        fail: (e: unknown) => void,
+        // Read by the cold-start test: the per-acquisition timeout is
+        // the setting that made this fail every time.
+        _opts?: { timeout?: number; enableHighAccuracy?: boolean },
+      ) => {
         const id = nextId++;
         watches.set(id, { ok, fail });
         return id;
@@ -269,20 +275,110 @@ describe("when the phone will not cooperate", () => {
     );
   });
 
-  it("explains a failed fix in terms of where to stand", () => {
+  it("KEEPS WAITING through a dropped reading rather than giving up", () => {
+    // GPS drops readings constantly. Treating every failure as fatal is
+    // how a capture that was working suddenly is not — and it threw
+    // away every good reading collected up to that point.
     render(view());
     fireEvent.click(screen.getByTestId("gps-start"));
     act(() => {
-      device.reject(2);
+      device.report(5);
+      device.report(5);
     });
-    expect(screen.getByTestId("gps-error")).toHaveTextContent(
-      /walls and trees/i,
+    act(() => {
+      device.reject(2); // POSITION_UNAVAILABLE, mid-capture
+    });
+    expect(screen.queryByTestId("gps-error")).toBeNull();
+    expect(screen.getByTestId("gps-sampling")).toHaveTextContent(
+      "2 readings so far",
     );
   });
 
-  it("mentions https when the device offers no geolocation at all", () => {
-    // The commonest real cause on a phone, and invisible otherwise:
-    // browsers refuse to share a position over plain http.
+  it("gives a COLD GPS a full minute to produce its first fix", () => {
+    // The bug that made this fail every time on a cold start: the
+    // per-acquisition timeout was set to the fifteen-second sampling
+    // window, and a cold GPS routinely takes thirty to sixty seconds.
+    render(view());
+    fireEvent.click(screen.getByTestId("gps-start"));
+
+    const opts = device.geolocation.watchPosition.mock.calls[0]![2];
+    expect(opts?.timeout ?? 0).toBeGreaterThanOrEqual(60_000);
+
+    // Twenty seconds in, still waiting — not failed.
+    act(() => {
+      vi.advanceTimersByTime(20_000);
+    });
+    expect(screen.getByTestId("gps-locating")).toBeInTheDocument();
+    expect(screen.queryByTestId("gps-error")).toBeNull();
+
+    // And a fix arriving that late is still used.
+    act(() => {
+      device.report(5);
+    });
+    expect(screen.getByTestId("gps-sampling")).toBeInTheDocument();
+  });
+
+  it("starts the fifteen seconds at the FIRST reading, not the button", () => {
+    // Otherwise a twenty-second cold start eats the whole window and
+    // leaves one reading to average.
+    render(view());
+    fireEvent.click(screen.getByTestId("gps-start"));
+    act(() => {
+      vi.advanceTimersByTime(20_000);
+    });
+    act(() => {
+      device.report(5);
+    });
+    // The window has only just begun.
+    act(() => {
+      vi.advanceTimersByTime(5_000);
+      device.report(5);
+      device.report(5);
+    });
+    expect(screen.getByTestId("gps-sampling")).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(11_000);
+    });
+    expect(screen.getByTestId("gps-save")).toBeInTheDocument();
+  });
+
+  it("gives up eventually, saying where to stand", () => {
+    render(view());
+    fireEvent.click(screen.getByTestId("gps-start"));
+    act(() => {
+      vi.advanceTimersByTime(61_000);
+    });
+    expect(screen.getByTestId("gps-error")).toHaveTextContent(
+      /walls and roofs/i,
+    );
+  });
+
+  it("names an INSECURE CONNECTION rather than blaming permissions", () => {
+    // The commonest real failure and the one whose symptom lies.
+    // Browsers only share a position in a secure context, so over
+    // http://192.168.x.x — exactly how a phone reaches a dev server —
+    // the call comes back as PERMISSION_DENIED. Telling somebody to
+    // check their browser permissions sends them somewhere that cannot
+    // possibly fix it.
+    Object.defineProperty(window, "isSecureContext", {
+      value: false,
+      configurable: true,
+    });
+    render(view());
+    fireEvent.click(screen.getByTestId("gps-start"));
+    expect(screen.getByTestId("gps-error")).toHaveTextContent(/https/i);
+    expect(screen.getByTestId("gps-error")).toHaveTextContent(
+      /nothing to change in your phone/i,
+    );
+    expect(device.geolocation.watchPosition).not.toHaveBeenCalled();
+    Object.defineProperty(window, "isSecureContext", {
+      value: true,
+      configurable: true,
+    });
+  });
+
+  it("says so when the device has no geolocation at all", () => {
     Object.defineProperty(globalThis, "navigator", {
       value: {},
       configurable: true,
@@ -290,7 +386,9 @@ describe("when the phone will not cooperate", () => {
     });
     render(view());
     fireEvent.click(screen.getByTestId("gps-start"));
-    expect(screen.getByTestId("gps-error")).toHaveTextContent(/https/i);
+    expect(screen.getByTestId("gps-error")).toHaveTextContent(
+      /location services/i,
+    );
   });
 });
 
