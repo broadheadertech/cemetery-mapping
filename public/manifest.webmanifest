@@ -1,13 +1,13 @@
 {
-  "name": "Broadheader Memorial Park",
-  "short_name": "Broadheader",
-  "description": "Cemetery management system — internal use.",
+  "name": "Apostle Paul Memorial Park",
+  "short_name": "Apostle Paul",
+  "description": "Cemetery management for Apostle Paul Memorial Park, Aringay, La Union.",
   "start_url": "/dashboard",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#ffffff",
-  "theme_color": "#1e293b",
+  "background_color": "#F6F2EA",
+  "theme_color": "#1D5C4D",
   "icons": [
     {
       "src": "/icons/icon-192.svg",
