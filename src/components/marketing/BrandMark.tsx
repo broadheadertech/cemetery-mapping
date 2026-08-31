@@ -4,7 +4,9 @@ import { cn } from "@/lib/cn";
 /**
  * Dove-within-laurel mark — the registered Apostle Paul figure.
  *
- * The canonical asset is `public/brand/mark.svg` (viewBox 0 0 600 535).
+ * The canonical asset is `public/brand/mark.png` — the supplied
+ * artwork with its white card keyed out by
+ * `scripts/build-brand-mark.mjs`. Square, so one number sizes it.
  * This wrapper sizes the mark, applies brand-correct framing and a
  * default `aria-label`, and keeps the mark in line with the type next
  * to it via `inline-flex`. The mark is decorative-by-default — set
@@ -28,7 +30,7 @@ export function BrandMark({
       style={{ width: size, height: size }}
     >
       <Image
-        src="/brand/mark.svg"
+        src="/brand/mark.png"
         width={size}
         height={size}
         alt={

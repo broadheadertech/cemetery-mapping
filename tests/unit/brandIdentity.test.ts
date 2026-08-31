@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
 const ROOT = path.resolve(__dirname, "../..");
@@ -59,64 +59,119 @@ describe("what an installed app calls itself", () => {
   });
 });
 
+
+/** Raw bytes of a repo file. */
+function bytes(rel: string): Buffer {
+  return readFileSync(path.join(ROOT, rel));
+}
+
+const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+
+function isPng(buf: Buffer): boolean {
+  return buf.subarray(0, 8).equals(PNG_SIGNATURE);
+}
+
+/** Width and height out of the IHDR chunk. */
+function pngSize(buf: Buffer): { width: number; height: number } {
+  return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+}
+
+/**
+ * Whether a PNG can be see-through.
+ *
+ * Colour type 6 (and 4) carry a per-pixel alpha channel; a palette
+ * image (type 3) carries transparency in a `tRNS` chunk instead. The
+ * quantised mark is the latter, so checking the colour type alone would
+ * call it opaque.
+ */
+function hasTransparency(buf: Buffer): boolean {
+  const colourType = buf.readUInt8(25);
+  if (colourType === 4 || colourType === 6) return true;
+  return buf.includes(Buffer.from("tRNS", "ascii"));
+}
+
+/** Every source file, for the "nothing points at the old asset" sweep. */
+function walk(dir: string, out: string[] = []): string[] {
+  for (const entry of readdirSync(dir)) {
+    const full = path.join(dir, entry);
+    if (statSync(full).isDirectory()) walk(full, out);
+    else if (/\.tsx?$/.test(full)) out.push(full);
+  }
+  return out;
+}
+
+describe("the brand mark itself", () => {
+  const MARK = "public/brand/mark.png";
+
+  it("is a PNG with real transparency", () => {
+    // The artwork was supplied as a JPEG, which has no alpha channel at
+    // all. Used as-is it paints a white card: a visible box on the
+    // ivory nav, and glaring on the #144437 sidebar.
+    const buf = bytes(MARK);
+    expect(isPng(buf)).toBe(true);
+    expect(hasTransparency(buf)).toBe(true);
+  });
+
+  it("is square, so one number sizes it everywhere", () => {
+    // It is drawn at 32px in the sidebar and 360px on the marketing
+    // hero from the same file.
+    const { width, height } = pngSize(bytes(MARK));
+    expect(width).toBe(height);
+  });
+
+  it("is big enough for the largest place it is drawn", () => {
+    // The 512px launcher icon is the biggest consumer.
+    expect(pngSize(bytes(MARK)).width).toBeGreaterThanOrEqual(512);
+  });
+
+  it("is not so heavy that every page pays for it", () => {
+    // The sidebar draws this on every screen in the app. Unquantised it
+    // was very nearly a megabyte.
+    expect(bytes(MARK).length).toBeLessThan(400 * 1024);
+  });
+
+  it("leaves no screen pointing at the retired SVG", () => {
+    // Six screens referenced `/brand/mark.svg`. A missed one is a
+    // broken image on a login page, which is not somewhere to find out.
+    const offenders = walk(path.join(ROOT, "src")).filter((f) =>
+      readFileSync(f, "utf8").includes("/brand/mark.svg"),
+    );
+    expect(offenders).toEqual([]);
+  });
+});
+
 describe("the launcher icons", () => {
-  const icons = ["public/icons/icon-192.svg", "public/icons/icon-512.svg"];
+  const icons = ["public/icons/icon-192.png", "public/icons/icon-512.png"];
 
-  it("are no longer the BH placeholder", () => {
-    for (const file of icons) {
-      const svg = read(file);
-      expect(svg).not.toMatch(/>BH</);
-      expect(svg).not.toContain("#1e293b");
-    }
-  });
-
-  it("carry the actual mark", () => {
-    // The gold diamond inlay where the laurel stems cross is unique to
-    // the real mark — a redrawn approximation would not have it.
-    for (const file of icons) {
-      expect(read(file)).toContain("#C9A96B");
-      expect(read(file)).toContain(EMERALD);
-    }
-  });
-
-  it("sit on the brand ground rather than transparency", () => {
-    // A launcher composites onto the wallpaper. An emerald mark on a
-    // dark wallpaper simply disappears.
-    for (const file of icons) {
-      expect(read(file)).toContain(IVORY);
-    }
-  });
-
-  it("stay inside a launcher's rounded mask", () => {
-    // The mark is scaled to 74% of the tile. Any transform that filled
-    // the tile would have the laurel's outer edge clipped on Android.
-    for (const file of icons) {
-      const m = /scale\(([0-9.]+)\)/.exec(read(file));
-      expect(m).not.toBeNull();
-      const px = file.includes("192") ? 192 : 512;
-      // 600 is the mark's own viewBox width.
-      const occupied = (Number(m![1]) * 600) / px;
-      expect(occupied).toBeLessThan(0.8);
-      expect(occupied).toBeGreaterThan(0.6);
-    }
-  });
-
-  it("match every size the manifest asks for", () => {
+  it("are real images at the sizes the manifest promises", () => {
     // A manifest pointing at a file that is not there is an icon that
     // silently falls back to a screenshot of the page.
     for (const entry of manifest.icons) {
       const rel = "public" + entry.src;
-      expect(() => read(rel)).not.toThrow();
-      const px = entry.sizes.split("x")[0];
-      expect(read(rel)).toContain(`viewBox="0 0 ${px} ${px}"`);
+      const buf = bytes(rel);
+      expect(isPng(buf)).toBe(true);
+      const px = Number(entry.sizes.split("x")[0]);
+      expect(pngSize(buf)).toEqual({ width: px, height: px });
     }
   });
 
-  it("are generated from the mark, and say so", () => {
-    // They embed a copy of the mark's paths. A copy nobody knows is a
-    // copy is a logo that drifts.
+  it("sit on the brand ground rather than transparency", () => {
+    // A launcher composites onto the wallpaper, and this mark is a dark
+    // green wreath — on a dark wallpaper it would disappear.
     for (const file of icons) {
-      expect(read(file)).toMatch(/GENERATED by scripts\/build-icons\.mjs/);
+      expect(hasTransparency(bytes(file))).toBe(false);
+    }
+  });
+
+  it("are declared as PNG, not left claiming to be SVG", () => {
+    for (const entry of manifest.icons) {
+      expect(entry.src).toMatch(/\.png$/);
+    }
+  });
+
+  it("no longer ship the BH placeholder", () => {
+    for (const file of ["public/icons/icon-192.svg", "public/icons/icon-512.svg"]) {
+      expect(existsSync(path.join(ROOT, file))).toBe(false);
     }
   });
 });

@@ -186,7 +186,7 @@ export default function CustomerLoginPage() {
             operational copy. Centred to give the surface gravity. */}
         <div className="flex flex-col items-center pb-6">
           <Image
-            src="/brand/mark.svg"
+            src="/brand/mark.png"
             alt=""
             width={72}
             height={72}

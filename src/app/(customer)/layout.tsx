@@ -115,7 +115,7 @@ export default async function CustomerLayout({
             className="flex items-center gap-3 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-2"
           >
             <Image
-              src="/brand/mark.svg"
+              src="/brand/mark.png"
               alt=""
               width={32}
               height={32}
