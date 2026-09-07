@@ -2106,3 +2106,88 @@ export const listForRowDrawing = queryGeneric({
       }));
   },
 });
+
+/**
+ * Take back a whole row's worth of positions at once.
+ *
+ * `placeLotRow` writes up to two hundred positions from one press, and
+ * until now undoing that meant two hundred separate visits to two
+ * hundred lot pages. A tool that can be wrong at scale needs an undo at
+ * the same scale; otherwise the safe move is never to use it, which is
+ * the opposite of what it was built for.
+ *
+ * Narrower than clearing one lot by hand, deliberately. Bulk is the
+ * convenient path and therefore the dangerous one, so it refuses to
+ * touch geometry that came from a survey file: wiping a measured
+ * outline should cost somebody a deliberate, single, per-lot decision.
+ */
+export const clearLotPositions = mutationGeneric({
+  args: { lotIds: v.array(v.id("lots")) },
+  handler: async (
+    ctx: MutationCtx,
+    args: { lotIds: LotId[] },
+  ): Promise<{ cleared: number; alreadyUnplaced: number }> => {
+    await requireRole(ctx, ["admin", "office_staff"]);
+
+    if (args.lotIds.length === 0) {
+      throwError(ErrorCode.VALIDATION, "Choose at least one lot.", {});
+    }
+    if (args.lotIds.length > MAX_ROW_LOTS) {
+      throwError(
+        ErrorCode.VALIDATION,
+        `That is ${args.lotIds.length} lots at once. Clear them a row at a time.`,
+        { given: args.lotIds.length },
+      );
+    }
+
+    // Every lot is checked before anything is written: a half-cleared
+    // row leaves no record of where it stopped.
+    const lots = [];
+    for (const id of args.lotIds) {
+      const lot = await ctx.db.get(id);
+      if (lot === null) {
+        throwError(ErrorCode.NOT_FOUND, "One of those lots is not there.", {
+          lotId: id,
+        });
+      }
+      if (lot.geometrySource === "imported") {
+        throwError(
+          ErrorCode.FORBIDDEN,
+          `Lot ${lot.code} was placed from a survey file. Clearing a measured position is done one lot at a time, on purpose.`,
+          { lotId: id },
+        );
+      }
+      lots.push(lot);
+    }
+
+    let cleared = 0;
+    let alreadyUnplaced = 0;
+    for (const lot of lots) {
+      if (lot.geometryStatus !== "surveyed") {
+        alreadyUnplaced += 1;
+        continue;
+      }
+      await ctx.db.patch(lot._id, {
+        geometry: getDefaultPlaceholderGeometry({ section: lot.section }),
+        geometryStatus: "placeholder",
+        geometrySource: undefined,
+        geometryAccuracyM: undefined,
+        geometryCapturedAt: undefined,
+      });
+      cleared += 1;
+
+      await emitAudit(ctx, {
+        action: "update",
+        entityType: "lot",
+        entityId: lot._id,
+        before: {
+          geometryStatus: lot.geometryStatus,
+          geometrySource: lot.geometrySource ?? null,
+        },
+        after: { geometryStatus: "placeholder" },
+      });
+    }
+
+    return { cleared, alreadyUnplaced };
+  },
+});
