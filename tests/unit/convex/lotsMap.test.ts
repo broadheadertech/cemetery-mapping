@@ -49,11 +49,13 @@ type RoleName = "admin" | "office_staff" | "field_worker" | "customer";
 function makeCtx(opts: {
   lots?: Row[];
   sections?: Row[];
+  occupants?: Row[];
   roles?: RoleName[];
 }) {
   const t = {
     lots: opts.lots ?? [],
     sections: opts.sections ?? [],
+    occupants: opts.occupants ?? [],
   };
 
   const caller = {
@@ -618,5 +620,122 @@ describe("the surveyed map", () => {
   it("refuses a customer", async () => {
     const { ctx } = makeCtx({ roles: ["customer"] });
     expect(await codeOf(() => runSurveyed(ctx, {}))).toBe(ErrorCode.FORBIDDEN);
+  });
+});
+
+/**
+ * Who is buried here.
+ *
+ * The question a cemetery map exists to answer, and the one the panel
+ * could not: the join did not exist, so the rail printed the
+ * illustrative parcel's procedural name under a hardcoded
+ * "1947 — 2024". The demo answered with fiction and the real park
+ * answered with nothing.
+ */
+describe("the occupants of a lot", () => {
+  function occ(over: Row = {}): Row {
+    return {
+      _id: "occupants:o1",
+      _creationTime: T0,
+      lotId: "lots:a1",
+      name: "Maria Santos",
+      isRemoved: false,
+      dateOfInterment: Date.parse("2019-03-04T00:00:00+08:00"),
+      dateOfDeath: Date.parse("2019-02-28T00:00:00+08:00"),
+      intermentKind: "body",
+      ...over,
+    };
+  }
+
+  it("names them", async () => {
+    const { ctx } = makeCtx({ lots: [lot()], occupants: [occ()] });
+    const d = await runDetail(ctx, { lotId: "lots:a1" });
+    expect(d.occupants).toHaveLength(1);
+    expect(d.occupants[0].name).toBe("Maria Santos");
+  });
+
+  it("EXCLUDES a removed occupant", async () => {
+    // A removal is a correction or an exhumation. The map still saying
+    // somebody is in the ground is the one wrong answer that cannot be
+    // brushed off at the counter.
+    const { ctx } = makeCtx({
+      lots: [lot()],
+      occupants: [occ({ isRemoved: true, removedAt: T0 })],
+    });
+    expect((await runDetail(ctx, { lotId: "lots:a1" })).occupants).toEqual([]);
+  });
+
+  it("tells a family plot as a history, oldest first", async () => {
+    const { ctx } = makeCtx({
+      lots: [lot()],
+      occupants: [
+        occ({
+          _id: "occupants:new",
+          name: "Recent",
+          dateOfInterment: Date.parse("2024-01-01T00:00:00+08:00"),
+        }),
+        occ({
+          _id: "occupants:old",
+          name: "Older",
+          dateOfInterment: Date.parse("1998-01-01T00:00:00+08:00"),
+        }),
+      ],
+    });
+    const d = await runDetail(ctx, { lotId: "lots:a1" });
+    expect(d.occupants.map((o: { name: string }) => o.name)).toEqual([
+      "Older",
+      "Recent",
+    ]);
+  });
+
+  it("keeps death and interment apart", async () => {
+    // Two different facts the records hold separately. Collapsing them
+    // into one lifespan is a guess dressed as a date.
+    const { ctx } = makeCtx({
+      lots: [lot()],
+      occupants: [occ({ dateOfDeath: undefined })],
+    });
+    const d = await runDetail(ctx, { lotId: "lots:a1" });
+    expect(d.occupants[0].dateOfDeath).toBeNull();
+    expect(d.occupants[0].dateOfInterment).not.toBeNull();
+  });
+
+  it("returns an empty list for an empty lot, not null", async () => {
+    const { ctx } = makeCtx({ lots: [lot()] });
+    expect((await runDetail(ctx, { lotId: "lots:a1" })).occupants).toEqual([]);
+  });
+});
+
+describe("how much to trust a position", () => {
+  it("reports the source and accuracy of a phone capture", async () => {
+    const { ctx } = makeCtx({
+      lots: [
+        lot({
+          geometryStatus: "surveyed",
+          geometrySource: "gps",
+          geometryAccuracyM: 7,
+          geometryCapturedAt: T0,
+        }),
+      ],
+    });
+    const d = await runDetail(ctx, { lotId: "lots:a1" });
+    expect(d.geometrySource).toBe("gps");
+    expect(d.geometryAccuracyM).toBe(7);
+    expect(d.geometryCapturedAt).toBe(T0);
+  });
+
+  it("claims NOTHING about a lot that was never placed", async () => {
+    // A placeholder centroid is written at lot creation. Describing how
+    // it was "obtained" would dress a stand-in as a measurement.
+    const { ctx } = makeCtx({ lots: [lot({ geometrySource: "gps" })] });
+    const d = await runDetail(ctx, { lotId: "lots:a1" });
+    expect(d.lat).toBeNull();
+    expect(d.geometrySource).toBeNull();
+    expect(d.geometryAccuracyM).toBeNull();
+  });
+
+  it("leaves the source null on records that predate the field", async () => {
+    const { ctx } = makeCtx({ lots: [lot({ geometryStatus: "surveyed" })] });
+    expect((await runDetail(ctx, { lotId: "lots:a1" })).geometrySource).toBeNull();
   });
 });

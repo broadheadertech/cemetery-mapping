@@ -17,11 +17,12 @@
  * browser-only.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useQuery } from "convex/react";
 import { makeFunctionReference } from "convex/server";
 
+import { layoutLabels } from "@/lib/labelLayout";
 import {
   bearingOf,
   decideMode,
@@ -171,6 +172,18 @@ export interface MapLotDetail {
   geometryStatus: string;
   photoUrl: string | null;
   photoUpdatedAt: number | null;
+  occupants: MapLotOccupantRow[];
+  geometrySource: string | null;
+  geometryAccuracyM: number | null;
+  geometryCapturedAt: number | null;
+}
+
+interface MapLotOccupantRow {
+  _id: string;
+  name: string;
+  dateOfInterment: number | null;
+  dateOfDeath: number | null;
+  intermentKind: string | null;
 }
 
 /** Map the 7-state lot lifecycle onto the 5 the 3D scene renders. */
@@ -253,6 +266,72 @@ const OCC = [
 const peso = (n: number) => "₱" + n.toLocaleString("en-PH");
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
+/**
+ * The standing instruction under the scene.
+ *
+ * A constant now. It used to be state so the phase switcher could
+ * briefly replace it with an invented sentence about a survey
+ * schedule; with the switcher gone nothing else ever wrote to it.
+ */
+const HINT = "Drag to orbit · scroll to zoom · click a lot to inspect";
+
+/**
+ * What a position is worth, in words.
+ *
+ * `surveyed` was doing the work of four very different claims. A
+ * measured outline and a phone fix beside a wall are both "surveyed"
+ * and neither the map nor this panel could tell them apart.
+ */
+function describeSource(
+  source: string | null,
+  accuracyM: number | null,
+): string {
+  switch (source) {
+    case "imported":
+      return "From a survey file — measured outline and angle.";
+    case "gps":
+      return accuracyM === null
+        ? "Captured on a phone at the lot."
+        : `Captured on a phone at the lot, accurate to about ${Math.round(accuracyM)}m — roughly ${Math.max(1, Math.round(accuracyM / 2.5))} grave${Math.round(accuracyM / 2.5) === 1 ? "" : "s"} either way.`;
+    case "drawn":
+      return "Laid out along a row drawn on the map. The angle is real; nobody stood at this plot.";
+    case "clicked":
+      return "Placed by pointing at a map. The centre is real; the shape is assumed from the recorded size.";
+    default:
+      // Older records predate the field. Claiming a source they never
+      // recorded would be worse than admitting it is unknown.
+      return "Position recorded before its source was tracked.";
+  }
+}
+
+/** Just the year, in Manila time — the park's own clock. */
+function year(ms: number): string {
+  return new Intl.DateTimeFormat("en-PH", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+  }).format(new Date(ms));
+}
+
+/**
+ * The dates under a name, saying which is which.
+ *
+ * Death and interment are different facts and the records hold them
+ * separately, so "1947 — 2024" would be a guess dressed as a lifespan
+ * whenever only one of them is known. When only the burial date exists
+ * it says so rather than pretending the pair.
+ */
+function lifespan(o: {
+  dateOfDeath: number | null;
+  dateOfInterment: number | null;
+}): string {
+  if (o.dateOfDeath !== null && o.dateOfInterment !== null) {
+    return `d. ${year(o.dateOfDeath)} · interred ${year(o.dateOfInterment)}`;
+  }
+  if (o.dateOfDeath !== null) return `d. ${year(o.dateOfDeath)}`;
+  if (o.dateOfInterment !== null) return `Interred ${year(o.dateOfInterment)}`;
+  return "Dates not recorded";
+}
+
 const PILL_TINT: Record<LotStatus, string> = {
   available: "bg-status-available-bg text-status-available-text",
   reserved: "bg-status-reserved-bg text-status-reserved-text",
@@ -329,11 +408,7 @@ export default function Phase3DMap({
   const [rollup, setRollup] = useState<Rollup | null>(null);
   const [filter, setFilter] = useState<string>("all");
   const [autoRotate, setAutoRotate] = useState(false);
-  const [hint, setHint] = useState(
-    "Drag to orbit · scroll to zoom · click a lot to inspect",
-  );
   const [ready, setReady] = useState(false);
-  const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isDemo, setIsDemo] = useState(false);
 
   // Live inventory for Phase 1's gardens. While the query is loading we
@@ -1205,13 +1280,42 @@ export default function Phase3DMap({
     const updateLabels = () => {
       const w = stage.clientWidth;
       const h = stage.clientHeight;
-      labelEls.forEach(({ el, sec }) => {
-        _v.set(sec.cx, 5.5, -sec.d / 2 - 2);
+      /*
+       * Garden labels, kept off each other.
+       *
+       * Projecting each one and writing it straight to the DOM meant
+       * that two gardens close together — or a camera flattened toward
+       * the horizon — put their labels on the same few pixels, where
+       * they stacked into an unreadable heap and the top one was
+       * whichever the loop wrote last.
+       *
+       * The arithmetic is in `@/lib/labelLayout`, where overlap can be
+       * checked with numbers rather than by squinting at a screenshot.
+       */
+      const boxes = labelEls.map(({ el, sec }) => {
+        _v.set(sec.cx, 5.5, sec.cz - sec.d / 2 - 2);
         _v.project(camera);
-        const behind = _v.z > 1;
-        el.style.opacity = behind ? "0" : "1";
-        el.style.left = (_v.x * 0.5 + 0.5) * w + "px";
-        el.style.top = (-_v.y * 0.5 + 0.5) * h + "px";
+        return {
+          key: sec.id,
+          x: (_v.x * 0.5 + 0.5) * w,
+          y: (-_v.y * 0.5 + 0.5) * h,
+          // Measured, not assumed: a garden with a long name needs more
+          // room, and guessing a width would let long labels overlap
+          // while short ones were pushed apart for nothing.
+          width: el.offsetWidth || 160,
+          height: el.offsetHeight || 24,
+          depth: _v.z,
+          behind: _v.z > 1,
+        };
+      });
+
+      const placements = layoutLabels(boxes, { width: w, height: h });
+      placements.forEach((p, i) => {
+        const el = labelEls[i]?.el;
+        if (el === undefined) return;
+        el.style.opacity = p.visible ? "1" : "0";
+        el.style.left = p.x + "px";
+        el.style.top = p.y + "px";
       });
     };
 
@@ -1276,23 +1380,6 @@ export default function Phase3DMap({
     apiRef.current?.setAutoRotate(autoRotate);
   }, [autoRotate, sceneSignature]);
 
-  const onPhaseClick = useCallback((phase: number) => {
-    if (phase !== 1) {
-      setHint(`Phase ${phase} — GPS survey scheduled; 3D mesh not yet captured`);
-      if (hintTimer.current) clearTimeout(hintTimer.current);
-      hintTimer.current = setTimeout(
-        () => setHint("Drag to orbit · scroll to zoom · click a lot to inspect"),
-        3200,
-      );
-      return;
-    }
-    apiRef.current?.resetView();
-  }, []);
-
-  useEffect(() => () => {
-    if (hintTimer.current) clearTimeout(hintTimer.current);
-  }, []);
-
   const dims =
     selected?.type === "family"
       ? "4.0 m × 2.4 m"
@@ -1332,27 +1419,21 @@ export default function Phase3DMap({
           ))}
         </div>
 
-        {/* View controls + phase switcher */}
+        {/*
+          View controls.
+
+          The PHASE 1 / 2 / 3 switcher that used to sit here was
+          decoration asserting things nothing had checked: Phase 1 was
+          styled active unconditionally, clicking it did what the reset
+          button beside it already does, and 2 and 3 popped "GPS survey
+          scheduled; 3D mesh not yet captured" — a sentence written for
+          a demo, about a schedule no record holds.
+
+          The map has no notion of a phase; it draws whatever gardens
+          exist. Real phase state lives on /phase-planning, which the
+          page header already links to.
+        */}
         <div className="absolute right-4 top-4 flex items-center gap-2">
-          {!isPublic && (
-          <div className="flex overflow-hidden rounded-md border border-surface-border bg-surface-base/95 shadow-[var(--shadow-card)]">
-            {[1, 2, 3].map((n) => (
-              <button
-                key={n}
-                type="button"
-                onClick={() => onPhaseClick(n)}
-                className={[
-                  "px-3 py-2 font-mono text-[11px] font-semibold tracking-wide transition-colors",
-                  n === 1
-                    ? "bg-accent-gold text-primary-hover"
-                    : "text-text-muted hover:text-primary",
-                ].join(" ")}
-              >
-                PHASE {n}
-              </button>
-            ))}
-          </div>
-          )}
           <button
             type="button"
             onClick={() => setAutoRotate((v) => !v)}
@@ -1395,7 +1476,7 @@ export default function Phase3DMap({
 
         {/* Hint */}
         <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-surface-border bg-surface-muted/90 px-3.5 py-1.5 font-mono text-[10.5px] uppercase tracking-wide text-text-muted">
-          {hint}
+          {HINT}
         </div>
 
         {!ready && (
@@ -1553,9 +1634,29 @@ export default function Phase3DMap({
                   Location
                 </div>
                 {detail.lat !== null && detail.lng !== null ? (
-                  <div className="mt-1 font-mono text-xs text-text-default">
-                    {detail.lat.toFixed(6)}, {detail.lng.toFixed(6)}
-                  </div>
+                  <>
+                    <div className="mt-1 font-mono text-xs text-text-default">
+                      {detail.lat.toFixed(6)}, {detail.lng.toFixed(6)}
+                    </div>
+                    {/*
+                      How much to trust that pair.
+
+                      A measured survey, a point somebody clicked, a
+                      phone reading with metres of slop and a row drawn
+                      on a map all render as the same confident box. The
+                      coordinate says WHERE; only this says how well
+                      anybody actually knows.
+                    */}
+                    <div
+                      data-testid="lot-position-source"
+                      className="mt-1 text-[11px] leading-snug text-text-muted"
+                    >
+                      {describeSource(
+                        detail.geometrySource,
+                        detail.geometryAccuracyM,
+                      )}
+                    </div>
+                  </>
                 ) : (
                   <div className="mt-1 text-xs text-text-muted">
                     Not surveyed yet — this lot has no measured position,
@@ -1590,19 +1691,57 @@ export default function Phase3DMap({
               </p>
             )}
 
-            {selected.occupant && (
-              <div className="mt-5 rounded-lg border border-surface-border bg-surface-muted p-4 text-center">
-                <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-text-muted">
-                  Resting here
+            {/*
+              Who is buried here — the question a cemetery map exists to
+              answer, and the one this panel could not.
+
+              It printed the illustrative parcel's procedural name under
+              a hardcoded "1947 — 2024", so the demo answered it with
+              fiction and the real park answered it with nothing.
+            */}
+            {detail !== undefined && detail !== null && detail.occupants.length > 0 && (
+              <div
+                data-testid="lot-occupants"
+                className="mt-5 rounded-lg border border-surface-border bg-surface-muted p-4"
+              >
+                <div className="text-center font-mono text-[10px] uppercase tracking-[0.12em] text-text-muted">
+                  {detail.occupants.length === 1
+                    ? "Resting here"
+                    : `Resting here · ${detail.occupants.length}`}
                 </div>
-                <div className="mt-1 font-display text-xl font-semibold text-text-default">
-                  {selected.occupant}
-                </div>
-                <div className="mt-0.5 font-mono text-xs text-text-muted">
-                  1947 — 2024
-                </div>
+                <ul className="mt-2 space-y-3">
+                  {detail.occupants.map((o) => (
+                    <li key={o._id} className="text-center">
+                      <div className="font-display text-xl font-semibold text-text-default">
+                        {o.name}
+                      </div>
+                      <div className="mt-0.5 font-mono text-xs text-text-muted">
+                        {lifespan(o)}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
+
+            {/*
+              An occupied lot with nobody recorded in it is a gap in the
+              records, not an empty grave. Saying so beats a blank space
+              that reads as "nobody is buried here".
+            */}
+            {detail !== undefined &&
+              detail !== null &&
+              detail.occupants.length === 0 &&
+              selected.status === "occupied" &&
+              !isPublic && (
+                <p
+                  data-testid="lot-occupants-missing"
+                  className="mt-5 rounded-lg border border-dashed border-surface-border px-3 py-2 text-center text-xs text-text-muted"
+                >
+                  Marked occupied, but no interment record is attached to
+                  this lot.
+                </p>
+              )}
 
             <div className="mt-5 space-y-2.5">
               {isPublic ? (
