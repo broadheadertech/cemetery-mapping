@@ -46,10 +46,10 @@ import { ActiveContractPanel } from "./ActiveContractPanel";
 import { ConditionLogsPanel } from "./ConditionLogsPanel";
 import { LotPhotoPanel } from "./LotPhotoPanel";
 import { LotGpsCapture } from "@/components/LotGpsCapture";
+import { LotPaymentHistory } from "./LotPaymentHistory";
 import { LotFactsPanel, type LotFactsData } from "./LotFactsPanel";
 import { OccupantsPanel } from "./OccupantsPanel";
 import { OwnershipPanel } from "./OwnershipPanel";
-import { PaymentHistoryPlaceholder } from "./PaymentHistoryPlaceholder";
 
 export interface LotDetailData {
   _id: string;
@@ -158,10 +158,14 @@ export function LotDetail({ detail, roles = [], onRetire }: LotDetailProps) {
         <LotFactsPanel facts={facts} />
       </ReactiveHighlight>
 
-      <OwnershipPanel />
+      <OwnershipPanel lotId={detail._id} />
       <OccupantsPanel />
       <ActiveContractPanel />
-      <PaymentHistoryPlaceholder />
+      {/*
+        Was a panel saying "Payments coming in Epic 3" while the
+        payments themselves sat one screen away.
+      */}
+      <LotPaymentHistory lotId={detail._id} />
       {/* The photograph sits above the condition log deliberately: one
           is what the lot IS, the other is a dated note about a problem
           with it. */}

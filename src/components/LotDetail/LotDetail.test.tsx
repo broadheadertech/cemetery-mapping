@@ -101,14 +101,23 @@ describe("LotDetail", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows the Phase 1 empty states for unimplemented relations", () => {
+  it("shows empty states for relations this lot has none of", () => {
     render(<LotDetail detail={baseDetail} roles={["office_staff"]} />);
     expect(screen.getByTestId("ownership-empty")).toBeInTheDocument();
     expect(screen.getByTestId("occupants-empty")).toBeInTheDocument();
     expect(screen.getByTestId("contract-empty")).toBeInTheDocument();
-    expect(screen.getByTestId("payments-placeholder")).toBeInTheDocument();
     // Convex stub returns undefined → loading state in the condition panel.
     expect(screen.getByTestId("conditions-loading")).toBeInTheDocument();
+  });
+
+  it("shows real payment history, not a promise of it", () => {
+    // The panel here used to read "Payments coming in Epic 3" while
+    // Epic 3's payments sat one screen away, so the page told staff a
+    // working part of the system was unbuilt.
+    render(<LotDetail detail={baseDetail} roles={["office_staff"]} />);
+    expect(screen.getByTestId("lot-payment-history")).toBeInTheDocument();
+    expect(screen.queryByTestId("payments-placeholder")).toBeNull();
+    expect(screen.queryByText(/coming in Epic/i)).toBeNull();
   });
 
   it("formats base price as pesos", () => {

@@ -114,8 +114,12 @@ export default function IntermentsListPage() {
 
       <p className="text-sm text-slate-600">
         Coordination view of cemetery interments. Schedule a new interment from
-        a lot’s detail page (or use the helper above to pick a lot first). The
-        calendar view ships in Story 7.3.
+        a lot’s detail page (or use the helper above to pick a lot first). For
+        the same records laid out by date, see the{" "}
+        <Link href="/ceremonies/calendar" className="underline hover:text-slate-900">
+          ceremonies calendar
+        </Link>
+        .
       </p>
 
       <div

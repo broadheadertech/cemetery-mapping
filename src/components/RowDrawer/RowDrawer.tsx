@@ -76,6 +76,12 @@ interface SectionOutline {
   boundary: LatLng[];
 }
 
+const clearPositionsRef = makeFunctionReference<
+  "mutation",
+  { lotIds: string[] },
+  { cleared: number; alreadyUnplaced: number }
+>("lots:clearLotPositions");
+
 const boundariesRef = makeFunctionReference<
   "query",
   Record<string, never>,
@@ -97,6 +103,20 @@ export function RowDrawer({
   const candidates = useQuery(candidatesRef, { sectionName });
   const outlines = useQuery(boundariesRef, {});
   const placeRow = useMutation(placeRowRef);
+  const clearPositions = useMutation(clearPositionsRef);
+  /**
+   * The row just placed, so it can be taken back.
+   *
+   * One press writes up to two hundred positions; without this, undoing
+   * a row drawn along the wrong line meant two hundred visits to two
+   * hundred lot pages. A tool that can be wrong at scale needs an undo
+   * at the same scale, or the safe move is never to use it.
+   */
+  const [lastPlaced, setLastPlaced] = useState<{
+    ids: string[];
+    label: string;
+  } | null>(null);
+  const [undoing, setUndoing] = useState(false);
 
   const [line, setLine] = useState<{
     start: LatLng | null;
@@ -285,9 +305,11 @@ export function RowDrawer({
         start,
         end,
       });
+      const label = `${selected[0]!.code} to ${selected[selected.length - 1]!.code}`;
       setPlacedNote(
-        `Placed ${res.placed} lot${res.placed === 1 ? "" : "s"}: ${selected[0]!.code} to ${selected[selected.length - 1]!.code}.`,
+        `Placed ${res.placed} lot${res.placed === 1 ? "" : "s"}: ${label}.`,
       );
+      setLastPlaced({ ids: selected.map((x) => x._id), label });
       setLine({ start: null, end: null });
     } catch (e: unknown) {
       setError(translateError(e).detail);
@@ -396,6 +418,33 @@ export function RowDrawer({
           className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900"
         >
           {placedNote} Draw the next row.
+          {lastPlaced !== null && (
+            <>
+              {" "}
+              <button
+                type="button"
+                disabled={undoing}
+                data-testid="row-undo"
+                onClick={() => {
+                  setUndoing(true);
+                  setError(null);
+                  void clearPositions({ lotIds: lastPlaced.ids })
+                    .then((r) => {
+                      setPlacedNote(null);
+                      setLastPlaced(null);
+                      setError(
+                        `Took back ${r.cleared} position${r.cleared === 1 ? "" : "s"} — ${lastPlaced.label} are unplaced again.`,
+                      );
+                    })
+                    .catch((e: unknown) => setError(translateError(e).detail))
+                    .finally(() => setUndoing(false));
+                }}
+                className="font-medium underline hover:no-underline"
+              >
+                {undoing ? "Taking it back…" : "Undo this row"}
+              </button>
+            </>
+          )}
         </p>
       )}
 

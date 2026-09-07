@@ -141,6 +141,14 @@ export function LotMap({
     statusFilters,
   });
   const outlines = useQuery(listBoundariesRef, {});
+  /**
+   * Bumped to ask the map to re-frame itself on the lots.
+   *
+   * The automatic fit happens once, so a deliberate pan survives the
+   * next data tick. This is the way back after wandering off — which,
+   * on a map that opens over a town, people do.
+   */
+  const [refitToken, setRefitToken] = useState(0);
 
   /*
    * Once Leaflet is up, it stays up.
@@ -232,6 +240,7 @@ export function LotMap({
             selectedLotId={selectedLotId}
             onBboxChange={handleLeafletBboxChange}
             focusPoint={focusPoint}
+            refitToken={refitToken}
           />
           {/* Overlays, so the map underneath keeps its zoom and pan. */}
           {isRefreshing && (
@@ -242,6 +251,16 @@ export function LotMap({
             >
               Updating&hellip;
             </div>
+          )}
+          {safeLots.length > 0 && (
+            <button
+              type="button"
+              data-testid="map-refit"
+              onClick={() => setRefitToken((n) => n + 1)}
+              className="absolute right-3 bottom-3 z-[1000] rounded-md border border-surface-border bg-surface-base/95 px-2.5 py-1.5 text-[11px] font-medium text-text-default shadow-[var(--shadow-card)] hover:text-primary"
+            >
+              Zoom to lots
+            </button>
           )}
           {!isRefreshing && safeLots.length === 0 && (
             <div

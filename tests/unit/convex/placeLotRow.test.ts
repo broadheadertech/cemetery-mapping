@@ -23,7 +23,7 @@ vi.mock("../../../convex/lib/audit", () => ({
 }));
 
 import { getAuthSessionId, getAuthUserId } from "@convex-dev/auth/server";
-import { placeLotRow } from "../../../convex/lots";
+import { clearLotPositions, placeLotRow } from "../../../convex/lots";
 import { ErrorCode } from "../../../convex/lib/errors";
 import { ConvexError, type Value } from "convex/values";
 import type { ErrorPayload } from "../../../convex/lib/errors";
@@ -126,6 +126,7 @@ function handlerOf(fn: any): (ctx: unknown, args: unknown) => Promise<any> {
 }
 
 const run = handlerOf(placeLotRow);
+const runClear = handlerOf(clearLotPositions);
 
 async function codeOf(fn: () => Promise<unknown>): Promise<string | undefined> {
   try {
@@ -270,5 +271,94 @@ describe("refusing to write", () => {
     expect(
       await codeOf(() => run(ctx, { lotIds: ["lots:1"], start: START, end: END })),
     ).toBe(ErrorCode.FORBIDDEN);
+  });
+});
+
+/**
+ * Taking a whole row back.
+ *
+ * `placeLotRow` writes up to two hundred positions from one press, and
+ * undoing that used to mean two hundred visits to two hundred lot
+ * pages. A tool that can be wrong at scale needs an undo at the same
+ * scale, or the safe move is never to use it — which is the opposite of
+ * what it was built for.
+ */
+describe("taking a row back", () => {
+  it("unplaces every lot given", async () => {
+    const { ctx, patches } = makeCtx({
+      lots: [
+        lot("lots:1", { geometryStatus: "surveyed", geometrySource: "drawn" }),
+        lot("lots:2", { geometryStatus: "surveyed", geometrySource: "drawn" }),
+      ],
+    });
+    const res = await runClear(ctx, { lotIds: ["lots:1", "lots:2"] });
+    expect(res.cleared).toBe(2);
+    expect(patches).toHaveLength(2);
+    expect(patches[0]!.patch.geometryStatus).toBe("placeholder");
+    expect(patches[0]!.patch.geometrySource).toBeUndefined();
+  });
+
+  it("counts an already-unplaced lot without failing on it", async () => {
+    // Undoing twice, or undoing a row somebody already tidied, should
+    // be quiet rather than an error.
+    const { ctx } = makeCtx({
+      lots: [
+        lot("lots:1", { geometryStatus: "surveyed", geometrySource: "drawn" }),
+        lot("lots:2"),
+      ],
+    });
+    const res = await runClear(ctx, { lotIds: ["lots:1", "lots:2"] });
+    expect(res.cleared).toBe(1);
+    expect(res.alreadyUnplaced).toBe(1);
+  });
+
+  it("REFUSES to bulk-clear a surveyed import", async () => {
+    // Bulk is the convenient path and therefore the dangerous one.
+    // Wiping a measured outline should cost a deliberate, single,
+    // per-lot decision.
+    const { ctx } = makeCtx({
+      lots: [
+        lot("lots:1", { geometryStatus: "surveyed", geometrySource: "drawn" }),
+        lot("lots:2", {
+          geometryStatus: "surveyed",
+          geometrySource: "imported",
+        }),
+      ],
+    });
+    expect(
+      await codeOf(() => runClear(ctx, { lotIds: ["lots:1", "lots:2"] })),
+    ).toBe(ErrorCode.FORBIDDEN);
+  });
+
+  it("writes NOTHING when one lot in the batch is protected", async () => {
+    // A half-cleared row leaves no record of where it stopped.
+    const { ctx, patches } = makeCtx({
+      lots: [
+        lot("lots:1", { geometryStatus: "surveyed", geometrySource: "drawn" }),
+        lot("lots:2", {
+          geometryStatus: "surveyed",
+          geometrySource: "imported",
+        }),
+      ],
+    });
+    await codeOf(() => runClear(ctx, { lotIds: ["lots:1", "lots:2"] }));
+    expect(patches).toHaveLength(0);
+  });
+
+  it("refuses an empty batch", async () => {
+    const { ctx } = makeCtx();
+    expect(await codeOf(() => runClear(ctx, { lotIds: [] }))).toBe(
+      ErrorCode.VALIDATION,
+    );
+  });
+
+  it("is not field work", async () => {
+    const { ctx } = makeCtx({
+      roles: ["field_worker"],
+      lots: [lot("lots:1", { geometryStatus: "surveyed" })],
+    });
+    expect(await codeOf(() => runClear(ctx, { lotIds: ["lots:1"] }))).toBe(
+      ErrorCode.FORBIDDEN,
+    );
   });
 });

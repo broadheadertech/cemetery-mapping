@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useQuery } from "convex/react";
 import { makeFunctionReference } from "convex/server";
 
@@ -62,11 +64,23 @@ export function CustomerPortalGreeting({
           : "The estate holds your contracts and receipts here, in quiet keeping."}
       </p>
 
-      <div className="mt-6 rounded-md border border-dashed border-surface-border bg-surface-muted p-6 text-center text-sm text-text-muted">
+      {/*
+        Was a dashed box promising contracts "in a forthcoming release"
+        while /portal/contracts was live and listing them. A family
+        signing in was told the thing they came for did not exist yet.
+      */}
+      <div className="mt-6 rounded-md border border-surface-border bg-surface-muted p-6 text-center text-sm">
         <p className="font-medium text-text-default">Your contracts</p>
-        <p className="mt-1">
-          The estate will surface your contracts here in a forthcoming release.
+        <p className="mt-1 text-text-muted">
+          Your agreements with the estate, and what has been paid against
+          each.
         </p>
+        <Link
+          href="/portal/contracts"
+          className="mt-3 inline-flex min-h-[38px] items-center rounded-md border border-surface-border bg-surface-base px-4 py-2 font-medium text-text-default hover:border-accent-gold hover:text-primary"
+        >
+          View your contracts
+        </Link>
       </div>
     </div>
   );

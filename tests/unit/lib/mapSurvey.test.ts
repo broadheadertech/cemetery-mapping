@@ -14,6 +14,7 @@ import { describe, expect, it } from "vitest";
 import {
   bearingOf,
   decideMode,
+  mayDrawIllustrativeScenery,
   extentOf,
   footprintOf,
   metresBetween,
@@ -253,5 +254,22 @@ describe("choosing the view", () => {
     ]);
     expect(d.placedCount).toBe(35);
     expect(d.unplacedCount).toBe(9);
+  });
+});
+
+describe("what the scene may invent", () => {
+  it("allows the illustrative furniture on an arrangement", () => {
+    // The whole view is a diagram there: gardens laid side by side in
+    // an order somebody chose, nothing claiming to be a place.
+    expect(mayDrawIllustrativeScenery("arrangement")).toBe(true);
+  });
+
+  it("REFUSES it on a survey", () => {
+    // Avenues, a promenade, a row of trees and a chapel, all positioned
+    // by arithmetic off the bounding box of the measured lots — and
+    // drawn at true scale beside graves that really are where they
+    // appear. A reader would be right to conclude there is a chapel at
+    // the south end of the park. There is not; there is a number.
+    expect(mayDrawIllustrativeScenery("survey")).toBe(false);
   });
 });

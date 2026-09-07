@@ -207,3 +207,28 @@ export function decideMode(
     unplacedCount,
   };
 }
+
+/**
+ * Whether the scene may draw furniture nobody surveyed.
+ *
+ * The map carries scenery the park never recorded: avenues between the
+ * garden blocks, a promenade along the front, a row of trees down each
+ * edge, and a chapel at one end. On an ARRANGEMENT that is fine and
+ * even useful — the whole view is a diagram, the gardens are laid out
+ * side by side in an order somebody chose, and nothing on screen claims
+ * to be a place.
+ *
+ * On a SURVEY every one of those is positioned by arithmetic off the
+ * bounding box of the measured lots, and drawn at true scale beside
+ * graves that really are where they appear. A reader has no way to tell
+ * which is which, and would be right to conclude there is a chapel at
+ * the south end of the park. There is not; there is a number derived
+ * from how far apart the surveyed lots happen to lie.
+ *
+ * So: named rather than repeated as `!surveying` in four places, both
+ * because the reason is the same in all four and because the next
+ * decoration somebody adds should have to answer this question.
+ */
+export function mayDrawIllustrativeScenery(mode: MapMode): boolean {
+  return mode !== "survey";
+}
