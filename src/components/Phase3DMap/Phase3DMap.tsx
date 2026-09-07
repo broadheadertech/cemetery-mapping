@@ -24,6 +24,14 @@ import { makeFunctionReference } from "convex/server";
 
 import { layoutLabels } from "@/lib/labelLayout";
 import {
+  baseSize,
+  hiddenMatrix,
+  instanceMatrix,
+  PARTS,
+  planInstances,
+  type Part,
+} from "@/lib/lotInstancing";
+import {
   bearingOf,
   decideMode,
   footprintOf,
@@ -273,6 +281,9 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
  * briefly replace it with an invented sentence about a survey
  * schedule; with the switcher gone nothing else ever wrote to it.
  */
+/** How far a selected grave rises, in metres. */
+const SELECTED_LIFT = 0.5;
+
 const HINT = "Drag to orbit · scroll to zoom · click a lot to inspect";
 
 /**
@@ -635,20 +646,13 @@ export default function Phase3DMap({
     grid.position.y = 0.02;
     scene.add(grid);
 
-    const matCache: Record<number, THREE.MeshStandardMaterial> = {};
-    const statMat = (c: number) => {
-      if (!matCache[c])
-        matCache[c] = new THREE.MeshStandardMaterial({
-          color: c,
-          roughness: 0.75,
-          metalness: 0.02,
-        });
-      return matCache[c];
-    };
-    const concrete = new THREE.MeshStandardMaterial({
-      color: 0xe7dfce,
-      roughness: 0.95,
-    });
+    /*
+     * The per-colour material cache that used to live here is gone.
+     *
+     * It existed so two thousand lots could share five materials. With
+     * instancing they share ONE material per part and carry their
+     * colour on the instance, so the cache had nothing left to cache.
+     */
     const pathMat = new THREE.MeshStandardMaterial({
       color: 0xd2c9b2,
       roughness: 1,
@@ -769,7 +773,27 @@ export default function Phase3DMap({
       scene.fog = new THREE.Fog(0xf6f2ea, dist * 1.5, dist * 3.6);
     }
 
-    const lots: THREE.Group[] = [];
+    /**
+     * One entry per lot, collected across every garden, drawn once.
+     *
+     * Replaces `THREE.Group[]`: a lot is no longer an object in the
+     * scene, it is a row here plus a set of indices into the shared
+     * instance buffers.
+     */
+    interface LotDraw {
+      userData: LotUserData;
+      type: string;
+      stone: boolean;
+      x: number;
+      z: number;
+      rotY: number;
+      wallH: number;
+      insetColor: number;
+      statusColor: number;
+      baseW: number;
+      baseD: number;
+    }
+    const draws: LotDraw[] = [];
     const labelEls: { el: HTMLDivElement; sec: SectionDef }[] = [];
     let gid = 0;
 
@@ -915,87 +939,7 @@ export default function Phase3DMap({
                 : null;
           }
           const cfg = STATUS[st];
-          const isMaus = type === "mausoleum";
-          const g = new THREE.Group();
-          g.position.set(cell.x, 0, cell.z);
-          g.rotation.y = cell.rotY;
-
-          const baseW = type === "family" ? 2.6 : 2.1;
-          const baseD = type === "family" ? 3.0 : 2.6;
-          const base = new THREE.Mesh(
-            new THREE.BoxGeometry(baseW, 0.3, baseD),
-            concrete,
-          );
-          base.position.y = 0.15;
-          base.castShadow = true;
-          base.receiveShadow = true;
-          g.add(base);
-          const inset = new THREE.Mesh(
-            new THREE.BoxGeometry(baseW - 0.5, 0.06, baseD - 0.5),
-            cfg.stone ? statMat(0xcdbfa6) : statMat(sec.tint),
-          );
-          inset.position.y = 0.33;
-          inset.receiveShadow = true;
-          g.add(inset);
-
-          if (isMaus) {
-            const h = 3.0 + rand(gid) * 1.1;
-            const wall = new THREE.Mesh(
-              new THREE.BoxGeometry(baseW - 0.2, h, baseD - 0.4),
-              statMat(cfg.color),
-            );
-            wall.position.y = 0.3 + h / 2;
-            wall.castShadow = true;
-            wall.receiveShadow = true;
-            g.add(wall);
-            const roof = new THREE.Mesh(
-              new THREE.ConeGeometry(baseW * 0.78, 0.85, 4),
-              statMat(0x144437),
-            );
-            roof.rotation.y = Math.PI / 4;
-            roof.position.y = 0.3 + h + 0.42;
-            roof.castShadow = true;
-            g.add(roof);
-            const fin = new THREE.Mesh(
-              new THREE.BoxGeometry(0.1, 0.6, 0.1),
-              statMat(0xc9a96b),
-            );
-            fin.position.y = 0.3 + h + 1.0;
-            g.add(fin);
-          } else if (cfg.stone) {
-            const w2 = baseW - 0.7;
-            const hs = new THREE.Mesh(
-              new THREE.BoxGeometry(w2, 1.2, 0.32),
-              statMat(cfg.color),
-            );
-            hs.position.set(0, 0.3 + 0.6, -baseD / 2 + 0.35);
-            hs.castShadow = true;
-            hs.receiveShadow = true;
-            g.add(hs);
-            const capMesh = new THREE.Mesh(
-              new THREE.CylinderGeometry(w2 / 2, w2 / 2, 0.32, 14, 1, false, 0, Math.PI),
-              statMat(cfg.color),
-            );
-            capMesh.rotation.z = Math.PI / 2;
-            capMesh.rotation.y = Math.PI / 2;
-            capMesh.position.set(0, 0.3 + 1.2, -baseD / 2 + 0.35);
-            capMesh.castShadow = true;
-            g.add(capMesh);
-          } else {
-            const stake = new THREE.Mesh(
-              new THREE.CylinderGeometry(0.05, 0.05, 0.6, 8),
-              statMat(0x4a8270),
-            );
-            stake.position.set(baseW / 2 - 0.25, 0.6, -baseD / 2 + 0.25);
-            g.add(stake);
-            const flag = new THREE.Mesh(
-              new THREE.BoxGeometry(0.4, 0.26, 0.02),
-              statMat(0x9bbf8f),
-            );
-            flag.position.set(baseW / 2 - 0.05, 0.8, -baseD / 2 + 0.25);
-            g.add(flag);
-          }
-
+          const { baseW, baseD } = baseSize(type);
           const userData: LotUserData = {
             id: realLotId ?? "lot" + gid,
             code,
@@ -1008,24 +952,169 @@ export default function Phase3DMap({
             block,
             realLotId,
           };
-          g.userData = userData;
-          scene.add(g);
-          lots.push(g);
+          /*
+           * A record, not nine meshes.
+           *
+           * Every lot used to become a THREE.Group of about nine
+           * objects. Ninety of those is invisible; eighteen thousand —
+           * two thousand lots — is a map that stops working at exactly
+           * the moment the park is finally mapped. The scene is built
+           * once, from these, after every garden has contributed.
+           */
+          draws.push({
+            userData,
+            type,
+            stone: cfg.stone,
+            x: cell.x,
+            z: cell.z,
+            rotY: cell.rotY,
+            // Mausoleum heights vary per lot. With a unit box that is a
+            // scale, not a second geometry.
+            wallH: 3.0 + rand(gid) * 1.1,
+            insetColor: cfg.stone ? 0xcdbfa6 : sec.tint,
+            statusColor: cfg.color,
+            baseW,
+            baseD,
+          });
         }
       }
 
       const el = document.createElement("div");
       el.className = "phase3d-seclabel";
-      const cnt = lots.filter(
-        (l) => (l.userData as LotUserData).sectionCode === sec.code,
-      );
+      const cnt = draws.filter((d) => d.userData.sectionCode === sec.code);
       const avail = cnt.filter(
-        (l) => (l.userData as LotUserData).status === "available",
+        (d) => d.userData.status === "available",
       ).length;
       el.innerHTML = `<span class="sn">${sec.name}</span><span class="sc">${cnt.length} LOTS · ${avail} OPEN</span>`;
       stage.appendChild(el);
       labelEls.push({ el, sec });
     });
+
+    /*
+     * ---- Build every lot in the park, at once -----------------------
+     *
+     * One InstancedMesh per PART rather than nine meshes per lot: about
+     * nine draw calls for the whole cemetery instead of eighteen
+     * thousand.
+     *
+     * Every geometry below is a UNIT shape. A family plot, a single and
+     * a mausoleum with a randomised wall height differ only in scale,
+     * so they share one box — and colour rides on the instance, so five
+     * statuses do not become five more meshes.
+     *
+     * The bookkeeping that maps a lot to its slots, and the matrices
+     * themselves, live in `@/lib/lotInstancing` where they are checked
+     * against numbers. An index off by one here selects the wrong grave
+     * and the map looks perfectly correct while doing it.
+     */
+    const plan = planInstances(
+      draws.map((d) => ({
+        lotId: d.userData.id,
+        type: d.type,
+        stone: d.stone,
+      })),
+    );
+    const drawById = new Map(draws.map((d) => [d.userData.id, d]));
+
+    const unitBox = new THREE.BoxGeometry(1, 1, 1);
+    const unitCone = new THREE.ConeGeometry(1, 1, 4);
+    // Baked, not applied per instance: the cap lies across the
+    // headstone, and an instance matrix here carries only a Y rotation.
+    const unitCap = new THREE.CylinderGeometry(
+      0.5, 0.5, 1, 14, 1, false, 0, Math.PI,
+    );
+    unitCap.rotateZ(Math.PI / 2);
+    unitCap.rotateY(Math.PI / 2);
+
+    const partGeometry: Record<Part, THREE.BufferGeometry> = {
+      base: unitBox,
+      inset: unitBox,
+      wall: unitBox,
+      roof: unitCone,
+      fin: unitBox,
+      headstone: unitBox,
+      cap: unitCap,
+      stake: unitBox,
+      flag: unitBox,
+    };
+
+    /** The colour a part takes, given the lot it belongs to. */
+    const partColour = (part: Part, d: LotDraw): number => {
+      switch (part) {
+        case "base":
+          return 0xe7dfce;
+        case "inset":
+          return d.insetColor;
+        case "wall":
+        case "headstone":
+        case "cap":
+          return d.statusColor;
+        case "roof":
+          return 0x144437;
+        case "fin":
+          return 0xc9a96b;
+        case "stake":
+          return 0x4a8270;
+        case "flag":
+          return 0x9bbf8f;
+      }
+    };
+
+    const instanced: Partial<Record<Part, THREE.InstancedMesh>> = {};
+    const _m = new THREE.Matrix4();
+    const _col = new THREE.Color();
+
+    /** Write one lot's transform into every buffer it appears in. */
+    const writeLot = (id: string, lift: number, visible: boolean) => {
+      const d = drawById.get(id);
+      const slots = plan.slotsByLot.get(id);
+      if (d === undefined || slots === undefined) return;
+      for (const slot of slots) {
+        const mesh = instanced[slot.part];
+        if (mesh === undefined) continue;
+        const elements = visible
+          ? instanceMatrix(
+              slot.part,
+              { baseW: d.baseW, baseD: d.baseD, wallH: d.wallH },
+              { x: d.x, z: d.z, rotY: d.rotY, lift },
+            )
+          : hiddenMatrix();
+        _m.fromArray(elements);
+        mesh.setMatrixAt(slot.index, _m);
+        mesh.instanceMatrix.needsUpdate = true;
+      }
+    };
+
+    for (const part of PARTS) {
+      const count = plan.counts[part] ?? 0;
+      if (count === 0) continue;
+      const mesh = new THREE.InstancedMesh(
+        partGeometry[part],
+        new THREE.MeshStandardMaterial({ roughness: 0.75, metalness: 0.02 }),
+        count,
+      );
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      // Rebuilt every frame otherwise: the park does not move, so the
+      // bounding sphere computed once is the one that stays true.
+      mesh.frustumCulled = false;
+      instanced[part] = mesh;
+      scene.add(mesh);
+
+      const ids = plan.lotIdsByPart[part] ?? [];
+      ids.forEach((id, index) => {
+        const d = drawById.get(id);
+        if (d === undefined) return;
+        _col.setHex(partColour(part, d));
+        mesh.setColorAt(index, _col);
+      });
+      if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true;
+    }
+
+    for (const d of draws) writeLot(d.userData.id, 0, true);
+
+    /** The mesh clicks are tested against — every lot has exactly one. */
+    const pickMesh = instanced.base ?? null;
 
     /*
      * Avenues + promenade.
@@ -1135,17 +1224,36 @@ export default function Phase3DMap({
     // Interaction.
     const ray = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
-    let selectedLot: THREE.Group | null = null;
+    let selectedId: string | null = null;
     let currentFilter = "all";
-    const findLot = (o: THREE.Object3D | null): THREE.Group | null => {
-      let cur: THREE.Object3D | null = o;
-      while (cur) {
-        if (cur.userData && (cur.userData as LotUserData).code)
-          return cur as THREE.Group;
-        cur = cur.parent;
-      }
-      return null;
+
+    const isShown = (u: LotUserData) =>
+      currentFilter === "all" || u.status === currentFilter;
+
+    /*
+     * Which grave was clicked.
+     *
+     * A lot is no longer an object with `userData` to walk up to — it
+     * is a row in a shared buffer. Raycasting the slab mesh returns an
+     * instance index, and the plan turns that number back into a lot.
+     * Getting this wrong selects the neighbouring grave and looks
+     * entirely correct doing it, which is why the mapping is tested.
+     */
+    const lotAtPointer = (): LotDraw | null => {
+      if (pickMesh === null) return null;
+      ray.setFromCamera(mouse, camera);
+      const hit = ray.intersectObject(pickMesh, false)[0];
+      const index = hit?.instanceId;
+      if (index === undefined) return null;
+      const id = plan.lotIdsByPart.base?.[index];
+      if (id === undefined) return null;
+      const d = drawById.get(id);
+      // A filtered-out lot is scaled to nothing, but a degenerate
+      // instance can still register a hit — so the filter decides here
+      // too rather than relying on the geometry having vanished.
+      return d !== undefined && isShown(d.userData) ? d : null;
     };
+
     const setPointer = (e: PointerEvent | MouseEvent) => {
       const r = renderer.domElement.getBoundingClientRect();
       mouse.x = ((e.clientX - r.left) / r.width) * 2 - 1;
@@ -1153,54 +1261,56 @@ export default function Phase3DMap({
     };
     const onPointerMove = (e: PointerEvent) => {
       setPointer(e);
-      ray.setFromCamera(mouse, camera);
-      const hit = ray.intersectObjects(lots, true)[0];
-      renderer.domElement.style.cursor = hit ? "pointer" : "grab";
+      renderer.domElement.style.cursor =
+        lotAtPointer() !== null ? "pointer" : "grab";
     };
     const onPointerDown = () => {
       renderer.domElement.style.cursor = "grabbing";
     };
     const onClick = (e: MouseEvent) => {
       setPointer(e);
-      ray.setFromCamera(mouse, camera);
-      const hit = ray.intersectObjects(lots, true)[0];
-      if (hit) {
-        const lot = findLot(hit.object);
-        const u = lot?.userData as LotUserData | undefined;
-        if (lot && u && (currentFilter === "all" || u.status === currentFilter)) {
-          selectLot(lot);
-        }
-      }
+      const d = lotAtPointer();
+      if (d !== null) selectLot(d);
     };
     renderer.domElement.addEventListener("pointermove", onPointerMove);
     renderer.domElement.addEventListener("pointerdown", onPointerDown);
     renderer.domElement.addEventListener("click", onClick);
 
-    function selectLot(lot: THREE.Group) {
-      selectedLot = lot;
-      const u = lot.userData as LotUserData;
+    function selectLot(d: LotDraw) {
+      // The previous selection drops back down. With groups this was a
+      // property on an object; with instances it is a rewrite of every
+      // slot that lot occupies.
+      if (selectedId !== null && selectedId !== d.userData.id) {
+        writeLot(selectedId, 0, true);
+      }
+      selectedId = d.userData.id;
+      writeLot(selectedId, SELECTED_LIFT, true);
       ring.visible = true;
-      ring.position.set(lot.position.x, 0.1, lot.position.z);
-      setSelected({ ...u });
+      ring.position.set(d.x, 0.1, d.z);
+      setSelected({ ...d.userData });
     }
 
     const applyFilter = (f: string) => {
       currentFilter = f;
-      // Toggle whole-lot visibility rather than mutating mesh materials:
-      // lots share cached materials (keyed by colour), so per-mesh opacity
-      // writes collide (last write wins) and the shared concrete bases
-      // never dim. Hiding the group is unambiguous and cheap.
-      lots.forEach((g) => {
-        const u = g.userData as LotUserData;
-        g.visible = f === "all" || u.status === f;
-      });
-      const u = selectedLot?.userData as LotUserData | undefined;
-      ring.visible = Boolean(
-        selectedLot &&
-          selectedLot.visible &&
-          u &&
-          (f === "all" || u.status === f),
-      );
+      /*
+       * A hidden instance is scaled to nothing.
+       *
+       * An object could be removed from the scene; an instance cannot —
+       * the buffer is fixed. Dimming via materials is not an option
+       * either, for the reason it never was: parts share one material
+       * per kind, so a per-lot opacity write would be last-write-wins
+       * across the whole park.
+       */
+      for (const d of draws) {
+        const shown = isShown(d.userData);
+        writeLot(
+          d.userData.id,
+          shown && d.userData.id === selectedId ? SELECTED_LIFT : 0,
+          shown,
+        );
+      }
+      const sel = selectedId === null ? null : drawById.get(selectedId);
+      ring.visible = sel !== undefined && sel !== null && isShown(sel.userData);
     };
 
     // Camera focus / reset.
@@ -1228,15 +1338,15 @@ export default function Phase3DMap({
 
     // Roll-up stats (computed once).
     {
-      const total = lots.length;
-      const avail = lots.filter(
+      const total = draws.length;
+      const avail = draws.filter(
         (l) => (l.userData as LotUserData).status === "available",
       ).length;
-      const occ = lots.filter(
+      const occ = draws.filter(
         (l) => (l.userData as LotUserData).status === "occupied",
       ).length;
       const sections: SectionRollup[] = SECTIONS.map((sec) => {
-        const c = lots.filter(
+        const c = draws.filter(
           (l) => (l.userData as LotUserData).sectionCode === sec.code,
         );
         const oc = c.filter((l) => {
@@ -1323,18 +1433,23 @@ export default function Phase3DMap({
     let pulse = 0;
     const animate = () => {
       raf = requestAnimationFrame(animate);
-      lots.forEach((g) => {
-        const t = g === selectedLot ? 0.5 : 0;
-        g.position.y += (t - g.position.y) * 0.18;
-      });
+      /*
+       * The selected lot's lift is written once when it is selected,
+       * not eased every frame across every lot.
+       *
+       * The old loop touched all two thousand objects on every frame to
+       * animate one of them. Writing an instance matrix costs a buffer
+       * upload, so the same trick here would push the whole park to the
+       * GPU sixty times a second to raise one grave by half a metre.
+       */
       if (camTarget && tgtTarget) {
         camera.position.lerp(camTarget, 0.08);
         controls.target.lerp(tgtTarget, 0.08);
         if (camera.position.distanceTo(camTarget) < 0.5) camTarget = null;
       }
-      if (ring.visible && selectedLot) {
+      if (ring.visible) {
         pulse += 0.05;
-        ring.position.y = 0.1 + Math.sin(pulse) * 0.05 + selectedLot.position.y;
+        ring.position.y = 0.1 + Math.sin(pulse) * 0.05 + SELECTED_LIFT;
         ring.scale.setScalar(1 + Math.sin(pulse) * 0.03);
       }
       if (renderer.domElement.width === 0 || renderer.domElement.height === 0)
@@ -1346,9 +1461,8 @@ export default function Phase3DMap({
 
     // Open with the first available lot selected.
     const initial =
-      lots.find((l) => (l.userData as LotUserData).status === "available") ??
-      lots[0];
-    if (initial) selectLot(initial);
+      draws.find((d) => d.userData.status === "available") ?? draws[0];
+    if (initial !== undefined) selectLot(initial);
     setReady(true);
     animate();
 
