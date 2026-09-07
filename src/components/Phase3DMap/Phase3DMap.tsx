@@ -24,6 +24,12 @@ import { makeFunctionReference } from "convex/server";
 
 import { layoutLabels } from "@/lib/labelLayout";
 import {
+  placementBand,
+  PLACEMENT_BANDS,
+  uncertaintyRadiusM,
+  type ColourMode,
+} from "@/lib/placementPalette";
+import {
   baseSize,
   hiddenMatrix,
   instanceMatrix,
@@ -123,6 +129,8 @@ interface SurveyedLotRow {
   lat: number;
   lng: number;
   polygon: Array<{ lat: number; lng: number }>;
+  source: string | null;
+  accuracyM: number | null;
 }
 
 interface SurveyedSectionRow {
@@ -231,6 +239,9 @@ interface MapApi {
   resetView: () => void;
   setAutoRotate: (on: boolean) => void;
   focusSection: (index: number) => void;
+  setColourMode: (mode: ColourMode) => void;
+  /** Select and fly to a lot by code. Returns false when there is none. */
+  focusLotByCode: (code: string) => boolean;
 }
 
 const STATUS: Record<LotStatus, { color: number; stone: boolean }> = {
@@ -419,6 +430,24 @@ export default function Phase3DMap({
   const [rollup, setRollup] = useState<Rollup | null>(null);
   const [filter, setFilter] = useState<string>("all");
   const [autoRotate, setAutoRotate] = useState(false);
+  /**
+   * What the lot colours are answering.
+   *
+   * Status by default — it is what somebody at a desk needs. Placement
+   * is the auditing view: which parts of the park stand on a measured
+   * survey and which on a guess, a question nothing else in the app can
+   * answer at a glance.
+   */
+  const [colourMode, setColourMode] = useState<ColourMode>("status");
+  const [search, setSearch] = useState("");
+  /**
+   * True only after a search that found nothing.
+   *
+   * Distinct from an empty box: silence on a miss reads as the search
+   * being broken, and somebody retypes the same code twice before
+   * concluding the lot is not there.
+   */
+  const [searchMiss, setSearchMiss] = useState(false);
   const [ready, setReady] = useState(false);
   const [isDemo, setIsDemo] = useState(false);
 
@@ -523,6 +552,8 @@ export default function Phase3DMap({
         // though it were is the visible half of "this is not a survey".
         rotY: foot === null ? 0 : -bearingOf(foot),
         measuredShape: foot !== null,
+        source: l.source,
+        accuracyM: l.accuracyM,
       };
     });
   }, [surveyQuery]);
@@ -790,6 +821,8 @@ export default function Phase3DMap({
       wallH: number;
       insetColor: number;
       statusColor: number;
+      source: string | null;
+      accuracyM: number | null;
       baseW: number;
       baseD: number;
     }
@@ -854,6 +887,9 @@ export default function Phase3DMap({
         z: number;
         rotY: number;
         real: RealLotRow | null;
+        /** How the position was obtained. Null off a survey. */
+        source: string | null;
+        accuracyM: number | null;
       }
       const x0 = -sec.w / 2 + cellW / 2;
       const z0 = -sec.d / 2 + cellD / 2;
@@ -868,6 +904,8 @@ export default function Phase3DMap({
               x: p.x,
               z: p.z,
               rotY: p.rotY,
+              source: p.source,
+              accuracyM: p.accuracyM,
               real: {
                 _id: p.lot._id,
                 code: p.lot.code,
@@ -890,6 +928,15 @@ export default function Phase3DMap({
               x: sec.cx + x0 + c * cellW,
               z: sec.cz + z0 + r * cellD,
               rotY: 0,
+              /*
+               * Nothing on an arrangement. The lot is drawn where the
+               * grid puts it, which has no relationship to any stored
+               * position — colouring that by how well the stored one is
+               * known would describe a coordinate the screen is not
+               * showing.
+               */
+              source: null,
+              accuracyM: null,
               real: realMode ? (secReal[r * sec.cols + c] ?? null) : null,
             });
           }
@@ -973,6 +1020,8 @@ export default function Phase3DMap({
             wallH: 3.0 + rand(gid) * 1.1,
             insetColor: cfg.stone ? 0xcdbfa6 : sec.tint,
             statusColor: cfg.color,
+            source: cell.source,
+            accuracyM: cell.accuracyM,
             baseW,
             baseD,
           });
@@ -1111,6 +1160,36 @@ export default function Phase3DMap({
       if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true;
     }
 
+    /*
+     * Repaint the park by placement rather than by status.
+     *
+     * Cheap only because the parts are instanced: this is a handful of
+     * colour-buffer writes, where before it would have been reaching
+     * into eighteen thousand meshes' materials — which is why the
+     * previous renderer could not have offered this at all.
+     *
+     * The slab keeps its concrete colour in both modes. It is the
+     * ground the lot sits on, not a claim about the lot.
+     */
+    const applyColourMode = (mode: ColourMode) => {
+      for (const part of PARTS) {
+        const mesh = instanced[part];
+        if (mesh === undefined) continue;
+        const ids = plan.lotIdsByPart[part] ?? [];
+        ids.forEach((id, index) => {
+          const d = drawById.get(id);
+          if (d === undefined) return;
+          const hex =
+            mode === "placement" && part !== "base"
+              ? placementBand(d.source).color
+              : partColour(part, d);
+          _col.setHex(hex);
+          mesh.setColorAt(index, _col);
+        });
+        if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true;
+      }
+    };
+
     for (const d of draws) writeLot(d.userData.id, 0, true);
 
     /** The mesh clicks are tested against — every lot has exactly one. */
@@ -1212,6 +1291,41 @@ export default function Phase3DMap({
       scene.add(g);
     }
 
+    /*
+     * How far a phone fix could be out, drawn to scale.
+     *
+     * Shown for the SELECTED lot only. One translucent disc is a fact
+     * about the grave somebody is looking at; two thousand overlapping
+     * discs is a fog that hides the map. Only GPS gets one — a survey
+     * has an outline instead, and a drawn or clicked position has no
+     * measured uncertainty at all, so a ring there would invent a
+     * number nobody recorded.
+     */
+    const uncertainty = new THREE.Mesh(
+      new THREE.CircleGeometry(1, 48),
+      new THREE.MeshBasicMaterial({
+        color: 0xd9a441,
+        transparent: true,
+        opacity: 0.16,
+        depthWrite: false,
+      }),
+    );
+    uncertainty.rotation.x = -Math.PI / 2;
+    uncertainty.visible = false;
+    scene.add(uncertainty);
+
+    const showUncertainty = (d: LotDraw | null) => {
+      const radius =
+        d === null ? null : uncertaintyRadiusM(d.source, d.accuracyM);
+      if (d === null || radius === null) {
+        uncertainty.visible = false;
+        return;
+      }
+      uncertainty.visible = true;
+      uncertainty.position.set(d.x, 0.08, d.z);
+      uncertainty.scale.setScalar(radius);
+    };
+
     // Selection ring.
     const ring = new THREE.Mesh(
       new THREE.TorusGeometry(2.1, 0.09, 12, 40),
@@ -1287,6 +1401,7 @@ export default function Phase3DMap({
       writeLot(selectedId, SELECTED_LIFT, true);
       ring.visible = true;
       ring.position.set(d.x, 0.1, d.z);
+      showUncertainty(d);
       setSelected({ ...d.userData });
     }
 
@@ -1334,6 +1449,28 @@ export default function Phase3DMap({
         controls.autoRotate = on;
       },
       focusSection,
+      setColourMode: applyColourMode,
+      focusLotByCode: (code: string) => {
+        const wanted = code.trim().toLowerCase();
+        if (wanted.length === 0) return false;
+        /*
+         * Exact code first, then a prefix.
+         *
+         * "A-1-1" must find A-1-1 rather than A-1-10, which sorts
+         * earlier and would otherwise win — sending somebody to the
+         * wrong grave for a search that looked like it worked.
+         */
+        const d =
+          draws.find((x) => x.userData.code.toLowerCase() === wanted) ??
+          draws.find((x) => x.userData.code.toLowerCase().startsWith(wanted));
+        if (d === undefined) return false;
+        selectLot(d);
+        // Close enough to read the code on the marker, angled rather
+        // than straight down so the headstone is visible.
+        camTarget = new THREE.Vector3(d.x, 9, d.z + 11);
+        tgtTarget = new THREE.Vector3(d.x, 0.5, d.z);
+        return true;
+      },
     };
 
     // Roll-up stats (computed once).
@@ -1489,6 +1626,12 @@ export default function Phase3DMap({
     apiRef.current?.applyFilter(filter);
   }, [filter, sceneSignature]);
 
+  // Bridge colour mode → scene. Re-applied after a rebuild so the view
+  // somebody chose survives a data refresh.
+  useEffect(() => {
+    apiRef.current?.setColourMode(colourMode);
+  }, [colourMode, sceneSignature]);
+
   // Bridge auto-rotate toggle → controls (re-applied after a rebuild).
   useEffect(() => {
     apiRef.current?.setAutoRotate(autoRotate);
@@ -1514,6 +1657,54 @@ export default function Phase3DMap({
         <div ref={stageRef} className="absolute inset-0 overflow-hidden" />
 
         {/* Filter toolbar */}
+        {/*
+          Find a lot without orbiting for it.
+
+          The flat map has had find-a-grave for a long time; the 3D one
+          had nothing, so locating A-1-14 among two thousand meant
+          spinning the camera until you spotted it. By code, because
+          that is what is written on the paperwork somebody is holding
+          — a name search lives on /map, which can query occupants.
+        */}
+        {!isPublic && (
+          <form
+            className="absolute left-4 top-[62px] flex items-center gap-1.5 rounded-lg border border-surface-border bg-surface-base/95 p-1.5 shadow-[var(--shadow-card)] backdrop-blur"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const found = apiRef.current?.focusLotByCode(search) ?? false;
+              setSearchMiss(!found && search.trim().length > 0);
+            }}
+          >
+            <input
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setSearchMiss(false);
+              }}
+              placeholder="Find lot code…"
+              aria-label="Find a lot by its code"
+              data-testid="lot-search"
+              className="w-40 rounded-md border border-surface-border bg-surface-base px-2 py-1.5 text-xs text-text-default placeholder:text-text-muted"
+            />
+            <button
+              type="submit"
+              data-testid="lot-search-go"
+              className="rounded-md bg-primary px-2.5 py-1.5 text-xs font-semibold text-white"
+            >
+              Find
+            </button>
+            {searchMiss && (
+              <span
+                role="status"
+                data-testid="lot-search-miss"
+                className="max-w-[150px] text-[11px] leading-snug text-amber-700"
+              >
+                No lot with that code on the map.
+              </span>
+            )}
+          </form>
+        )}
+
         <div className="absolute left-4 top-4 flex max-w-[560px] flex-wrap gap-1.5 rounded-lg border border-surface-border bg-surface-base/95 p-1.5 shadow-[var(--shadow-card)] backdrop-blur">
           {FILTERS.map((f) => (
             <button
@@ -1572,20 +1763,77 @@ export default function Phase3DMap({
           </button>
         </div>
 
-        {/* Legend */}
-        <div className="absolute bottom-4 left-4 rounded-lg border border-surface-border bg-surface-base/95 px-4 py-3 shadow-[var(--shadow-card)]">
+        {/*
+          Legend.
+
+          It swaps wholesale rather than showing both palettes at once:
+          status and confidence are different questions, and a reader
+          must never be in doubt about which one the colours are
+          answering.
+        */}
+        <div
+          data-testid="map-legend"
+          className="absolute bottom-4 left-4 max-w-[240px] rounded-lg border border-surface-border bg-surface-base/95 px-4 py-3 shadow-[var(--shadow-card)]"
+        >
           <div className="mb-2 font-mono text-[9px] uppercase tracking-[0.18em] text-text-muted">
-            Lot status
+            {colourMode === "placement" ? "How it was placed" : "Lot status"}
           </div>
-          {LEGEND.map((l) => (
-            <div key={l.label} className="my-1 flex items-center gap-2 text-xs text-text-default">
-              <span
-                className="h-3 w-3 rounded-[3px]"
-                style={{ background: l.color }}
-              />
-              {l.label}
-            </div>
-          ))}
+          {colourMode === "placement"
+            ? PLACEMENT_BANDS.map((b) => (
+                <div
+                  key={b.kind}
+                  className="my-1 flex items-start gap-2 text-xs text-text-default"
+                >
+                  <span
+                    className="mt-0.5 h-3 w-3 shrink-0 rounded-[3px]"
+                    style={{
+                      background: `#${b.color.toString(16).padStart(6, "0")}`,
+                    }}
+                  />
+                  <span>
+                    {b.label}
+                    <span className="block text-[10px] leading-snug text-text-muted">
+                      {b.meaning}
+                    </span>
+                  </span>
+                </div>
+              ))
+            : LEGEND.map((l) => (
+                <div
+                  key={l.label}
+                  className="my-1 flex items-center gap-2 text-xs text-text-default"
+                >
+                  <span
+                    className="h-3 w-3 rounded-[3px]"
+                    style={{ background: l.color }}
+                  />
+                  {l.label}
+                </div>
+              ))}
+
+          {/*
+            Only offered on a survey. On an arrangement the lot is drawn
+            where the grid put it, which has no relationship to any
+            stored position — colouring that by how well the stored one
+            is known would describe a coordinate the screen is not
+            showing.
+          */}
+          {surveyMode && !isPublic && (
+            <button
+              type="button"
+              data-testid="colour-mode-toggle"
+              onClick={() =>
+                setColourMode((m) =>
+                  m === "status" ? "placement" : "status",
+                )
+              }
+              className="mt-2 border-t border-surface-border pt-2 text-[11px] font-medium text-text-muted underline hover:text-primary"
+            >
+              {colourMode === "placement"
+                ? "Colour by status"
+                : "Colour by how it was placed"}
+            </button>
+          )}
         </div>
 
         {/* Hint */}

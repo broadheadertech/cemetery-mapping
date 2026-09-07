@@ -1730,6 +1730,17 @@ export interface SurveyedMapLot {
   lng: number;
   /** The measured footprint. Empty when only a centre was recorded. */
   polygon: Array<{ lat: number; lng: number }>;
+  /**
+   * How this position was obtained, and how well.
+   *
+   * The survey view proves a lot is somewhere real and then says
+   * nothing about how confident that is — a measured corner and a
+   * phone fix taken beside a wall draw as the same solid box. Two
+   * scalars per lot is a small price for the map being able to show
+   * the difference.
+   */
+  source: string | null;
+  accuracyM: number | null;
 }
 
 /** How much of a garden has actually been placed. */
@@ -1813,6 +1824,8 @@ export const listSurveyedForMap = queryGeneric({
           lat: p.lat,
           lng: p.lng,
         })),
+        source: l.geometrySource ?? null,
+        accuracyM: l.geometryAccuracyM ?? null,
       });
     }
 
