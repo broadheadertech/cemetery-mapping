@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 /**
  * OwnershipPanel — Story 1.11 (AC1c).
  *
@@ -14,6 +16,8 @@
  */
 
 export interface OwnershipPanelProps {
+  /** The lot this panel belongs to, so a sale can start from here. */
+  lotId: string;
   /**
    * Phase 1 always `null`. Story 2.3 will populate with the active
    * ownership row. The optional prop lets the panel forward-evolve
@@ -25,7 +29,10 @@ export interface OwnershipPanelProps {
   } | null;
 }
 
-export function OwnershipPanel({ ownership = null }: OwnershipPanelProps) {
+export function OwnershipPanel({
+  lotId,
+  ownership = null,
+}: OwnershipPanelProps) {
   return (
     <section
       aria-labelledby="ownership-heading"
@@ -45,15 +52,19 @@ export function OwnershipPanel({ ownership = null }: OwnershipPanelProps) {
           >
             Available. No active owner is recorded for this lot.
           </p>
-          <button
-            type="button"
-            disabled
-            title="New sale ships in Epic 3"
-            aria-label="New sale (coming in Epic 3)"
-            className="cursor-not-allowed rounded-md border border-slate-200 bg-slate-100 px-4 py-2 text-sm font-medium text-slate-400"
+          {/*
+            Disabled, with a title saying sales "ship in Epic 3". They
+            shipped: /sales/new records one, and it even accepts the lot
+            as a parameter. The one screen where somebody notices a lot
+            is unsold was the screen refusing to let them sell it.
+          */}
+          <Link
+            href={`/sales/new?lotId=${encodeURIComponent(lotId)}`}
+            data-testid="ownership-new-sale"
+            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
           >
             New sale
-          </button>
+          </Link>
         </div>
       ) : (
         <dl className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">

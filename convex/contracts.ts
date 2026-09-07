@@ -4193,3 +4193,77 @@ export const reclaimLot = mutationGeneric({
     };
   },
 });
+
+/**
+ * One customer's contracts, newest first.
+ *
+ * The customer detail page reserved a slot for this and rendered
+ * "Contracts coming in Epic 3" into it. Epic 3 shipped; the contracts
+ * exist and the `by_customer` index has been there all along. Staff
+ * were being told a working part of the system was unbuilt.
+ */
+export interface CustomerContractRow {
+  _id: ContractId;
+  contractNumber: string;
+  lotId: LotId;
+  lotCode: string;
+  kind: string;
+  state: string;
+  totalPriceCents: number;
+  /**
+   * What has actually been paid against it.
+   *
+   * Summed from `payments` rather than read off the contract, which
+   * holds no running balance — and a contracts list that shows a price
+   * without saying how much of it has arrived is the list somebody has
+   * to leave in order to answer the only question they had.
+   */
+  paidCents: number;
+  createdAt: number;
+}
+
+export const listContractsForCustomer = queryGeneric({
+  args: { customerId: v.id("customers") },
+  handler: async (
+    ctx: QueryCtx,
+    args: { customerId: CustomerId },
+  ): Promise<CustomerContractRow[]> => {
+    await requireRole(ctx, ["admin", "office_staff"]);
+
+    const rows = await ctx.db
+      .query("contracts")
+      .withIndex("by_customer", (q) => q.eq("customerId", args.customerId))
+      .collect();
+
+    const out: CustomerContractRow[] = [];
+    for (const c of rows) {
+      // The lot code, not the id: a contract is discussed at the
+      // counter as "the one for A-1-14", never by document id.
+      const lot = await ctx.db.get(c.lotId);
+      const payments = await ctx.db
+        .query("payments")
+        .withIndex("by_contract", (q) =>
+          q.eq("contractId", c._id as unknown as string),
+        )
+        .collect();
+      // Voided payments are not money the customer paid.
+      const paidCents = payments
+        .filter((p) => p.isVoided !== true)
+        .reduce((n, p) => n + p.amountCents, 0);
+
+      out.push({
+        _id: c._id,
+        contractNumber: c.contractNumber,
+        lotId: c.lotId,
+        lotCode: lot?.code ?? "—",
+        kind: c.kind,
+        state: c.state,
+        totalPriceCents: c.totalPriceCents,
+        paidCents,
+        createdAt: c.createdAt,
+      });
+    }
+
+    return out.sort((a, b) => b.createdAt - a.createdAt);
+  },
+});

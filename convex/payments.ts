@@ -79,6 +79,7 @@ import { transitionContractState } from "./lib/stateMachines";
 
 type DataModel = DataModelFromSchemaDefinition<typeof schema>;
 type ContractId = DataModel["contracts"]["document"]["_id"];
+type LotId = DataModel["lots"]["document"]["_id"];
 type PaymentId = DataModel["payments"]["document"]["_id"];
 type ReceiptId = DataModel["receipts"]["document"]["_id"];
 type UserId = DataModel["users"]["document"]["_id"];
@@ -1267,5 +1268,73 @@ export const listContractPayments = queryGeneric({
       out.push(entry);
     }
     return out;
+  },
+});
+
+/**
+ * Every payment made against a lot, newest first.
+ *
+ * The lot detail page reserved a slot for this and rendered "Payments
+ * coming in Epic 3" into it. Epic 3 shipped. The payments exist, the
+ * indexes exist, and the page was telling staff a working part of the
+ * system was unbuilt — while the money it was disclaiming sat one
+ * screen away.
+ *
+ * Reached through the lot's contracts, since a payment belongs to a
+ * contract rather than to a plot. A lot resold after a cancellation has
+ * more than one, and both histories belong here: the question at the
+ * counter is "what has been paid on this lot", not "on this contract".
+ */
+export interface LotPaymentRow {
+  _id: PaymentId;
+  contractId: ContractId;
+  contractNumber: string;
+  amountCents: number;
+  paymentMethod: string;
+  receivedAt: number;
+  isVoided: boolean;
+  reference: string | null;
+}
+
+export const listLotPayments = queryGeneric({
+  args: { lotId: v.id("lots") },
+  handler: async (
+    ctx: QueryCtx,
+    args: { lotId: LotId },
+  ): Promise<LotPaymentRow[]> => {
+    await requireRole(ctx, ["admin", "office_staff"]);
+
+    const contracts = await ctx.db
+      .query("contracts")
+      .withIndex("by_lot", (q) => q.eq("lotId", args.lotId))
+      .collect();
+
+    const rows: LotPaymentRow[] = [];
+    for (const c of contracts) {
+      const payments = await ctx.db
+        .query("payments")
+        .withIndex("by_contract", (q) =>
+          q.eq("contractId", c._id as unknown as string),
+        )
+        .collect();
+      for (const p of payments) {
+        rows.push({
+          _id: p._id,
+          contractId: c._id,
+          contractNumber: c.contractNumber,
+          amountCents: p.amountCents,
+          paymentMethod: p.paymentMethod,
+          receivedAt: p.receivedAt,
+          // Voided payments are SHOWN, struck through, not hidden. A
+          // receipt exists in the world with that number on it, and a
+          // history that quietly omits it cannot be reconciled against
+          // the drawer.
+          isVoided: p.isVoided === true,
+          reference: p.reference ?? null,
+        });
+      }
+    }
+
+    return rows.sort((a, b) => b.receivedAt - a.receivedAt);
   },
 });

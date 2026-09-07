@@ -143,15 +143,17 @@ export default function LotsListPage() {
       <div className="flex items-center justify-between">
         <h1 className="font-display text-4xl font-semibold tracking-tight">Lots</h1>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            disabled
-            title="Map view ships in Story 1.12"
-            aria-label="Map view (coming in Story 1.12)"
-            className="rounded-md border border-slate-200 bg-slate-100 px-3 py-2 text-sm font-medium text-slate-400 cursor-not-allowed"
+          {/*
+            A dead button that told a screen reader the map "ships in
+            Story 1.12". It shipped. /map is in the sidebar, and this
+            page sat next to it insisting otherwise.
+          */}
+          <Link
+            href="/map"
+            className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:border-slate-300 hover:text-slate-900"
           >
             Map view
-          </button>
+          </Link>
           <Link
             href="/lots/new"
             className="rounded-md bg-[#1D5C4D] px-4 py-2 text-sm font-medium text-white hover:bg-[#144437]"

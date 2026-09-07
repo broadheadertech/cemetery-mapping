@@ -4,8 +4,6 @@ export { CustomerDetailSkeleton } from "./CustomerDetailSkeleton";
 export { RevealField, REVEAL_HIDE_MS } from "./RevealField";
 export { OwnershipHistoryList } from "./OwnershipHistoryList";
 export { ContactBlock } from "./ContactBlock";
-export { DocumentsPlaceholder } from "./DocumentsPlaceholder";
-export { ContractsPlaceholder } from "./ContractsPlaceholder";
 export { PortalInviteButton } from "./PortalInviteButton";
 export { OccupantsSection } from "./OccupantsSection";
 export type {
@@ -14,3 +12,4 @@ export type {
   CustomerGovIdType,
   OwnershipHistoryRowData,
 } from "./types";
+export { CustomerContracts } from "./CustomerContracts";

@@ -20,9 +20,9 @@ export type {
   ActiveContract,
   ActiveContractPanelProps,
 } from "./ActiveContractPanel";
-export { PaymentHistoryPlaceholder } from "./PaymentHistoryPlaceholder";
 export { ConditionLogsPanel } from "./ConditionLogsPanel";
 export { LotPhotoPanel } from "./LotPhotoPanel";
 export type { LotPhotoPanelProps } from "./LotPhotoPanel";
 export type { ConditionLogsPanelProps } from "./ConditionLogsPanel";
 export { LotDetailSkeleton } from "./LotDetailSkeleton";
+export { LotPaymentHistory } from "./LotPaymentHistory";

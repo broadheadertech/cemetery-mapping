@@ -8,8 +8,8 @@
  *   2. Contact block (phone, email, address as <dl>).
  *   3. Gov-ID block (RevealField — click to reveal, 30 s auto-hide).
  *   4. Ownership history (OwnershipHistoryList).
- *   5. ID-scan attachments grid (DocumentsPlaceholder — Story 2.2 owns).
- *   6. Contracts list (ContractsPlaceholder — Story 3.4 owns).
+ *   5. ID-scan attachments grid.
+ *   6. Contracts list, with what has been paid against each.
  *   7. Audit trail link (deep links to Story 6.5 audit page).
  *
  * Pure presentational at this level: the parent (`page.tsx`) owns the
@@ -31,8 +31,8 @@ import { formatDate } from "@/lib/time";
 
 import type { CustomerDetailData } from "./types";
 import { ContactBlock } from "./ContactBlock";
-import { ContractsPlaceholder } from "./ContractsPlaceholder";
-import { DocumentsPlaceholder } from "./DocumentsPlaceholder";
+import { CustomerContracts } from "./CustomerContracts";
+import { CustomerDocumentList } from "@/components/CustomerDocumentList";
 import { OccupantsSection } from "./OccupantsSection";
 import { OwnershipHistoryList } from "./OwnershipHistoryList";
 import { PortalInviteButton } from "./PortalInviteButton";
@@ -127,8 +127,31 @@ export function CustomerDetail({ detail }: CustomerDetailProps) {
         <div className="space-y-6">
           <OwnershipHistoryList customerId={detail.customerId} />
           <OccupantsSection customerId={detail.customerId} />
-          <DocumentsPlaceholder customerId={detail.customerId} />
-          <ContractsPlaceholder customerId={detail.customerId} />
+          {/*
+            Both of these were panels reserving space for data that
+            already existed, telling staff it was "coming in Epic 3"
+            while the real records sat one screen away.
+          */}
+          {/*
+            The list renders bare — it was built to sit under a heading
+            somebody else supplies, and the placeholder it replaces was
+            supplying one. Keeping the section wrapper here means the
+            page still has a "Documents" landmark to navigate to.
+          */}
+          <section
+            aria-labelledby="documents-heading"
+            data-testid="customer-documents"
+            className="rounded-md border border-slate-200 bg-white p-6"
+          >
+            <h2
+              id="documents-heading"
+              className="mb-4 text-base font-semibold text-slate-900"
+            >
+              Documents
+            </h2>
+            <CustomerDocumentList customerId={detail.customerId} />
+          </section>
+          <CustomerContracts customerId={detail.customerId} />
         </div>
       </div>
 
