@@ -38,6 +38,29 @@ export function detailLevelFor(zoom: number): DetailLevel {
   return "lots";
 }
 
+/**
+ * The most lots that can carry a visible code at once.
+ *
+ * Leaflet has no label-collision handling: every tooltip is drawn where
+ * its lot is, and when lots are 2.5m apart the codes land on top of
+ * each other and on the lots they belong to. Past this many in view, a
+ * labelled map is less readable than an unlabelled one — so the codes
+ * wait until somebody has zoomed in far enough to be looking at a row
+ * rather than a garden.
+ */
+export const MAX_LABELLED_LOTS = 40;
+
+/**
+ * Whether to draw lot codes at all.
+ *
+ * Zoom alone is not enough: a dense garden at zoom 19 still stacks
+ * forty codes into the space of a few, and the reader ends up with
+ * neither the codes nor a clear view of the plots.
+ */
+export function shouldLabelLots(zoom: number, lotsInView: number): boolean {
+  return detailLevelFor(zoom) === "labelled" && lotsInView <= MAX_LABELLED_LOTS;
+}
+
 export interface LatLng {
   lat: number;
   lng: number;

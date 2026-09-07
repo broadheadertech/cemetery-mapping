@@ -200,7 +200,7 @@ body {
  * box, border, drop shadow, arrow) reads as a popup somebody opened
  * rather than as a label on the ground.
  */
-.lotmap-section-label {
+.leaflet-tooltip.lotmap-section-label {
   background: transparent;
   border: 0;
   box-shadow: none;
@@ -216,7 +216,7 @@ body {
     0 0 6px rgba(246, 242, 234, 0.8);
 }
 
-.lotmap-section-label::before {
+.leaflet-tooltip.lotmap-section-label::before {
   display: none;
 }
 
@@ -226,7 +226,17 @@ body {
  * border, shadow, arrow — reads as a popup somebody opened; at two
  * hundred lots that is two hundred popups.
  */
-.lotmap-lot-code {
+/*
+ * Doubled class on purpose.
+ *
+ * Leaflet's own `.leaflet-tooltip` is a single class, and its
+ * stylesheet is imported INSIDE the map effect — so it is injected
+ * after this file and wins every tie. A single-class rule here lost
+ * silently, and the lot codes rendered as Leaflet's default white
+ * boxes with borders and drop shadows: two hundred popups over a
+ * cemetery, each hiding the lot it was labelling.
+ */
+.leaflet-tooltip.lotmap-lot-code {
   background: transparent;
   border: 0;
   box-shadow: none;
@@ -241,7 +251,7 @@ body {
     0 0 4px rgba(246, 242, 234, 0.9);
 }
 
-.lotmap-lot-code::before {
+.leaflet-tooltip.lotmap-lot-code::before {
   display: none;
 }
 
@@ -249,7 +259,7 @@ body {
  * A garden's name and lot count, shown instead of the lots themselves
  * when a grave would be under a pixel.
  */
-.lotmap-garden-pin {
+.leaflet-tooltip.lotmap-garden-pin {
   background: rgba(246, 242, 234, 0.94);
   border: 1px solid rgba(29, 92, 77, 0.25);
   border-radius: 6px;
@@ -262,6 +272,6 @@ body {
   pointer-events: none;
 }
 
-.lotmap-garden-pin::before {
+.leaflet-tooltip.lotmap-garden-pin::before {
   display: none;
 }

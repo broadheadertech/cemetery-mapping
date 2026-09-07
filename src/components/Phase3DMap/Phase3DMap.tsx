@@ -1441,18 +1441,44 @@ export default function Phase3DMap({
       ring.visible = sel !== undefined && sel !== null && isShown(sel.userData);
     };
 
-    // Camera focus / reset.
+    /*
+     * Camera focus / reset.
+     *
+     * The flight has to be INTERRUPTIBLE, and it was not. Each frame it
+     * pulled the camera 8% of the way toward its destination and only
+     * stopped once it got within half a metre — so a drag was undone on
+     * the very next frame, and because dragging kept the camera further
+     * than half a metre away, the stop condition never fired. Finding a
+     * lot left somebody locked to it, with the reset button the only
+     * way out.
+     *
+     * Two independent ways to stop now: touching the controls cancels
+     * it, and it gives up regardless after a fixed number of frames. A
+     * camera that will not let go is worse than one that stops early.
+     */
     let camTarget: THREE.Vector3 | null = null;
     let tgtTarget: THREE.Vector3 | null = null;
+    let flyFrames = 0;
+    const cancelFly = () => {
+      camTarget = null;
+      tgtTarget = null;
+      flyFrames = 0;
+    };
+    /** About three seconds at 60fps. */
+    const MAX_FLY_FRAMES = 180;
+    // Any grab, wheel or touch means the person has taken over.
+    controls.addEventListener("start", cancelFly);
     const focusSection = (index: number) => {
       const sec = SECTIONS[index];
       if (!sec) return;
       camTarget = new THREE.Vector3(sec.cx, 22, sec.d / 2 + 22);
       tgtTarget = new THREE.Vector3(sec.cx, 1, 0);
+      flyFrames = 0;
     };
     const resetView = () => {
       camTarget = CAM0.clone();
       tgtTarget = new THREE.Vector3(0, 1, 0);
+      flyFrames = 0;
     };
 
     apiRef.current = {
@@ -1482,6 +1508,7 @@ export default function Phase3DMap({
         // than straight down so the headstone is visible.
         camTarget = new THREE.Vector3(d.x, 9, d.z + 11);
         tgtTarget = new THREE.Vector3(d.x, 0.5, d.z);
+        flyFrames = 0;
         return true;
       },
     };
@@ -1592,10 +1619,21 @@ export default function Phase3DMap({
        * upload, so the same trick here would push the whole park to the
        * GPU sixty times a second to raise one grave by half a metre.
        */
-      if (camTarget && tgtTarget) {
+      if (camTarget !== null && tgtTarget !== null) {
+        flyFrames += 1;
         camera.position.lerp(camTarget, 0.08);
         controls.target.lerp(tgtTarget, 0.08);
-        if (camera.position.distanceTo(camTarget) < 0.5) camTarget = null;
+        /*
+         * Arriving is the ordinary way to finish; running out of frames
+         * is the guarantee. The old condition was the only one, and it
+         * could not fire while somebody was dragging against it.
+         */
+        if (
+          camera.position.distanceTo(camTarget) < 0.5 ||
+          flyFrames >= MAX_FLY_FRAMES
+        ) {
+          cancelFly();
+        }
       }
       if (ring.visible) {
         pulse += 0.05;
@@ -1622,6 +1660,7 @@ export default function Phase3DMap({
       if (ro) ro.disconnect();
       renderer.domElement.removeEventListener("pointermove", onPointerMove);
       renderer.domElement.removeEventListener("pointerdown", onPointerDown);
+      controls.removeEventListener("start", cancelFly);
       renderer.domElement.removeEventListener("click", onClick);
       controls.dispose();
       renderer.dispose();
