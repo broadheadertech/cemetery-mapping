@@ -30,6 +30,7 @@ import { FlagContractDialog } from "@/components/FlagContractDialog";
 import { MarkInDefaultDialog } from "@/components/MarkInDefaultDialog";
 import { ReclaimLotDialog } from "@/components/ReclaimLotDialog";
 import { StatusPill } from "@/components/ui/StatusPill";
+import { ContractPayments } from "@/components/ContractPayments";
 import { CertificatePanel } from "@/components/CertificatePanel";
 
 type ContractState =
@@ -1065,15 +1066,21 @@ export default function ContractDetailPage() {
        *   office can read to a family who asked for one. */}
       <CertificatePanel contractId={contractId} />
 
-      {/* TODO Story 3.6: replace this stub with the full contract
-       *   timeline (payment list, transition controls, void / cancel
-       *   actions, ownership history). The minimal view above is the
-       *   safe redirect target for Story 3.3's recordFullPaymentSale
-       *   in the interim. */}
-      <p className="text-xs text-slate-500">
-        Full timeline view (payments, transitions, void / cancel) ships in
-        Story 3.6.
-      </p>
+      {/*
+        The contract's financial history.
+
+        A sentence here used to read "Full timeline view (payments,
+        transitions, void / cancel) ships in Story 3.6" — printed
+        directly beneath the mark-in-default and reclaim-lot controls it
+        claimed were missing, on a page whose query for these payments
+        had existed all along. A page about a contract that cannot say
+        what has been paid on it sends somebody to the payments screen
+        to filter for the contract they were already looking at.
+      */}
+      <ContractPayments
+        contractId={contractId}
+        totalPriceCents={detail.totalPriceCents}
+      />
     </div>
   );
 }

@@ -111,7 +111,6 @@ describe("screens people actually use", () => {
      * visible in a diff — which is the whole point.
      */
     const KNOWN = [
-      "src/app/(staff)/contracts/[contractId]/page.tsx",
       "src/components/CustomerPortal/CustomerContractDetail.tsx",
       "src/components/PaymentForm/AllocationPreview.tsx",
       "src/components/PaymentForm/ReceiptPreviewModal.tsx",
