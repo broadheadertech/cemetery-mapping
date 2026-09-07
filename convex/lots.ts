@@ -1403,6 +1403,37 @@ export interface MapLotDetail {
   geometryStatus: string;
   photoUrl: string | null;
   photoUpdatedAt: number | null;
+  /**
+   * Who is buried here.
+   *
+   * The map could not answer this, which for a cemetery map is the
+   * question. Worse, the illustrative parcel INVENTED names — so the
+   * demo appeared to answer it and the real park did not.
+   *
+   * Ordered by interment date, oldest first: a family plot reads as a
+   * history, and the order it happened is the order it should be told.
+   */
+  occupants: MapLotOccupant[];
+  /**
+   * How the position was obtained, when there is one.
+   *
+   * A measured survey, a point somebody clicked, a phone reading with
+   * metres of slop, and a row drawn on a map all render as the same
+   * confident box. Naming the source is the difference between a
+   * position and a position you know how much to trust.
+   */
+  geometrySource: string | null;
+  /** The radius a phone capture claimed, in metres. */
+  geometryAccuracyM: number | null;
+  geometryCapturedAt: number | null;
+}
+
+export interface MapLotOccupant {
+  _id: string;
+  name: string;
+  dateOfInterment: number | null;
+  dateOfDeath: number | null;
+  intermentKind: string | null;
 }
 
 export const getMapLotDetail = queryGeneric({
@@ -1421,6 +1452,29 @@ export const getMapLotDetail = queryGeneric({
     // a position anybody measured. Reporting it as a location would
     // send somebody to the wrong part of the park with confidence.
     const surveyed = lot.geometryStatus === "surveyed";
+
+    /*
+     * Removed occupants stay out.
+     *
+     * A removal is a correction or an exhumation, and either way the
+     * map saying somebody is still in the ground is the one wrong
+     * answer that cannot be brushed off at the counter.
+     */
+    const occupants = (
+      await ctx.db
+        .query("occupants")
+        .withIndex("by_lot", (q) => q.eq("lotId", lot._id))
+        .collect()
+    )
+      .filter((o) => !o.isRemoved)
+      .sort((a, b) => (a.dateOfInterment ?? 0) - (b.dateOfInterment ?? 0))
+      .map((o) => ({
+        _id: o._id as string,
+        name: o.name,
+        dateOfInterment: o.dateOfInterment ?? null,
+        dateOfDeath: o.dateOfDeath ?? null,
+        intermentKind: o.intermentKind ?? null,
+      }));
 
     return {
       _id: lot._id,
@@ -1442,6 +1496,12 @@ export const getMapLotDetail = queryGeneric({
           ? await ctx.storage.getUrl(lot.photoStorageId)
           : null,
       photoUpdatedAt: lot.photoUpdatedAt ?? null,
+      occupants,
+      // Only meaningful once something has actually been placed; on a
+      // placeholder these would describe a position that is not real.
+      geometrySource: surveyed ? (lot.geometrySource ?? null) : null,
+      geometryAccuracyM: surveyed ? (lot.geometryAccuracyM ?? null) : null,
+      geometryCapturedAt: surveyed ? (lot.geometryCapturedAt ?? null) : null,
     };
   },
 });
