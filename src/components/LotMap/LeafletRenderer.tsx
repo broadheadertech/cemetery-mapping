@@ -4,6 +4,13 @@ import { useEffect, useRef, useState } from "react";
 import { LABEL_MAP } from "@/components/ui/StatusPill/icons";
 import type { Bbox } from "@/lib/geometry";
 import type { LotForMap } from "@/hooks/useLotsInViewport";
+import {
+  boundsOf,
+  detailLevelFor,
+  LABEL_MIN_ZOOM,
+  paddedBounds,
+  summariseGardens,
+} from "@/lib/mapDetail";
 
 /**
  * LeafletRenderer — Phase 2 map renderer (Story 8.2).
@@ -84,6 +91,14 @@ export interface LeafletRendererProps {
    * doesn't hit the init-time `_leaflet_pos` path.
    */
   focusPoint?: { lat: number; lng: number } | null;
+  /**
+   * Bumping this re-frames the view on the lots.
+   *
+   * The initial fit happens once, so a deliberate pan is not yanked
+   * back on the next data tick; this is how somebody asks for it again
+   * after wandering off.
+   */
+  refitToken?: number;
 }
 
 /**
@@ -143,6 +158,7 @@ export function LeafletRenderer({
   selectedLotId,
   onBboxChange,
   focusPoint,
+  refitToken,
 }: LeafletRendererProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   // Hold Leaflet's `Map` instance in a ref so we don't trip React's
@@ -165,6 +181,19 @@ export function LeafletRenderer({
   onBboxChangeRef.current = onBboxChange;
   const [ready, setReady] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
+  /** Current zoom, which decides whether lots or gardens are drawn. */
+  const [zoom, setZoom] = useState(17);
+  /**
+   * Whether the view has been framed on the lots yet.
+   *
+   * Once only. The map opened on a fixed cemetery-wide box, so a park a
+   * hundred metres across sat inside a view of the whole town — but
+   * re-framing on every data change would also yank the map out from
+   * under somebody who had panned somewhere deliberately.
+   */
+  const fittedRef = useRef(false);
+  /** The last refit request honoured, so one press fits once. */
+  const refitSeenRef = useRef<number | undefined>(undefined);
 
   // -- Bootstrap: dynamically import Leaflet + CSS, build the map.
   useEffect(() => {
@@ -225,6 +254,20 @@ export function LeafletRenderer({
             { padding: [16, 16], animate: false },
           );
         }
+
+        /*
+         * A scale bar.
+         *
+         * Without one a coloured square is just "small". With one it is
+         * two and a half metres, which is the difference between a map
+         * of a cemetery and a picture of some dots.
+         */
+        L.control.scale({ metric: true, imperial: false }).addTo(map);
+
+        // What is drawn depends on how much a metre is worth in pixels,
+        // so the zoom has to reach React.
+        setZoom(map.getZoom());
+        map.on("zoomend", () => setZoom(map.getZoom()));
 
         // Added first, so it paints beneath the lot layer.
         const outlineLayer = L.layerGroup().addTo(map);
@@ -329,6 +372,91 @@ export function LeafletRenderer({
 
       layerGroup.clearLayers();
 
+      /*
+       * Frame the view on the lots, once.
+       *
+       * The bootstrap fits the BBOX prop, which starts as the
+       * cemetery-wide default — so the map opened on the town with the
+       * park as a smudge near the middle. This fits what actually
+       * exists, the first time any of it arrives.
+       */
+      const map = mapRef.current as {
+        fitBounds?: (b: number[][], o: object) => void;
+        getZoom?: () => number;
+      } | null;
+      const askedAgain =
+        refitToken !== undefined && refitToken !== refitSeenRef.current;
+      if (askedAgain) refitSeenRef.current = refitToken;
+      if (
+        (askedAgain || !fittedRef.current) &&
+        lots.length > 0 &&
+        map?.fitBounds
+      ) {
+        const box = paddedBounds(
+          boundsOf(
+            lots.map((l) => ({
+              lat: l.geometry.centroid.lat,
+              lng: l.geometry.centroid.lng,
+            })),
+          ),
+        );
+        if (box !== null) {
+          fittedRef.current = true;
+          map.fitBounds(
+            [
+              [box.minLat, box.minLng],
+              [box.maxLat, box.maxLng],
+            ],
+            { padding: [28, 28], animate: false, maxZoom: 19 },
+          );
+          setZoom(map.getZoom?.() ?? 17);
+        }
+      }
+
+      /*
+       * Zoomed out, one marker per garden.
+       *
+       * A 2.5m grave is under a pixel at neighbourhood zoom, so drawing
+       * every lot produces a scatter of specks that says nothing about
+       * which garden they belong to or that they belong together at
+       * all. A garden with a count is the thing worth showing at that
+       * distance.
+       */
+      if (detailLevelFor(zoom) === "gardens") {
+        for (const g of summariseGardens(
+          lots.map((l) => ({
+            section: l.section,
+            status: l.status,
+            lat: l.geometry.centroid.lat,
+            lng: l.geometry.centroid.lng,
+          })),
+        )) {
+          const marker = L.circleMarker([g.centre.lat, g.centre.lng], {
+            radius: 11,
+            color: "#ffffff",
+            weight: 2,
+            fillColor: "#1D5C4D",
+            fillOpacity: 0.92,
+          });
+          marker.bindTooltip(
+            `${g.section} · ${g.lotCount} lot${g.lotCount === 1 ? "" : "s"}, ${g.availableCount} open`,
+            { permanent: true, direction: "top", className: "lotmap-garden-pin" },
+          );
+          // Clicking a garden zooms into it rather than selecting a lot
+          // nobody can see at this distance.
+          marker.on("click", () => {
+            const m = mapRef.current as {
+              setView?: (c: number[], z: number) => void;
+            } | null;
+            m?.setView?.([g.centre.lat, g.centre.lng], LABEL_MIN_ZOOM);
+          });
+          layerGroup.addLayer(marker);
+        }
+        return;
+      }
+
+      const labelled = detailLevelFor(zoom) === "labelled";
+
       for (const lot of lots) {
         const isSelected = lot._id === selectedLotId;
         const fillColor = getStatusFillColor(lot.status);
@@ -350,7 +478,23 @@ export function LeafletRenderer({
               weight: isSelected ? 4 : 2,
             },
           );
-          marker.bindTooltip(tooltipText);
+          /*
+           * Close in, the code is shown permanently.
+           *
+           * A hover tooltip is no use to somebody scanning for A-1-14
+           * among two hundred squares — it answers one lot at a time,
+           * for whichever the cursor happens to be over.
+           */
+          marker.bindTooltip(
+            labelled ? lot.code : tooltipText,
+            labelled
+              ? {
+                  permanent: true,
+                  direction: "center",
+                  className: "lotmap-lot-code",
+                }
+              : {},
+          );
           marker.on("click", () => onLotClick(lot._id));
           // Programmatic-access hook used by tests.
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -369,7 +513,16 @@ export function LeafletRenderer({
           fillOpacity: 0.5,
           weight: isSelected ? 4 : 2,
         });
-        polygon.bindTooltip(tooltipText);
+        polygon.bindTooltip(
+          labelled ? lot.code : tooltipText,
+          labelled
+            ? {
+                permanent: true,
+                direction: "center",
+                className: "lotmap-lot-code",
+              }
+            : {},
+        );
         polygon.on("click", () => onLotClick(lot._id));
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (polygon as any).options.lotId = lot._id;
@@ -380,7 +533,7 @@ export function LeafletRenderer({
     return () => {
       cancelled = true;
     };
-  }, [lots, selectedLotId, ready, onLotClick]);
+  }, [lots, selectedLotId, ready, onLotClick, zoom, refitToken]);
 
   /*
    * The gardens themselves.

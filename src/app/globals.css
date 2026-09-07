@@ -219,3 +219,49 @@ body {
 .lotmap-section-label::before {
   display: none;
 }
+
+/*
+ * A lot's code, drawn on the lot itself once the map is zoomed in far
+ * enough to read one. Leaflet's default tooltip chrome — white box,
+ * border, shadow, arrow — reads as a popup somebody opened; at two
+ * hundred lots that is two hundred popups.
+ */
+.lotmap-lot-code {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: #1d3a30;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 0;
+  pointer-events: none;
+  text-shadow:
+    0 1px 2px rgba(246, 242, 234, 0.95),
+    0 0 4px rgba(246, 242, 234, 0.9);
+}
+
+.lotmap-lot-code::before {
+  display: none;
+}
+
+/*
+ * A garden's name and lot count, shown instead of the lots themselves
+ * when a grave would be under a pixel.
+ */
+.lotmap-garden-pin {
+  background: rgba(246, 242, 234, 0.94);
+  border: 1px solid rgba(29, 92, 77, 0.25);
+  border-radius: 6px;
+  box-shadow: none;
+  color: #1d5c4d;
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  pointer-events: none;
+}
+
+.lotmap-garden-pin::before {
+  display: none;
+}
