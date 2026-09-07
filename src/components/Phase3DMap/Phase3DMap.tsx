@@ -41,6 +41,7 @@ import {
   bearingOf,
   decideMode,
   footprintOf,
+  mayDrawIllustrativeScenery,
   projectToScene,
   type MapMode,
 } from "@/lib/mapSurvey";
@@ -745,6 +746,18 @@ export default function Phase3DMap({
      * surveying an irregular park in the first place.
      */
     const surveying = surveyModeRef.current;
+    /**
+     * Whether the invented furniture may be drawn at all.
+     *
+     * Avenues, the promenade, the trees and the chapel are all placed
+     * by arithmetic off the parcel's extent. On a survey that extent is
+     * measured ground, so they would sit at true scale beside graves
+     * that really are where they appear — and nothing on screen would
+     * tell a reader which is which.
+     */
+    const illustrative = mayDrawIllustrativeScenery(
+      surveying ? "survey" : "arrangement",
+    );
     const placed = placementsRef.current ?? [];
     let totalW = 0;
 
@@ -1204,7 +1217,7 @@ export default function Phase3DMap({
      * would put a road where the park has none.
      */
     const parcelD = Math.max(...SECTIONS.map((s) => s.d)) + 5;
-    for (let i = 0; !surveying && i < SECTIONS.length - 1; i++) {
+    for (let i = 0; illustrative && i < SECTIONS.length - 1; i++) {
       const a = SECTIONS[i];
       const b = SECTIONS[i + 1];
       if (!a || !b) continue;
@@ -1217,7 +1230,7 @@ export default function Phase3DMap({
       p.receiveShadow = true;
       scene.add(p);
     }
-    if (!surveying) {
+    if (illustrative) {
       const prom = new THREE.Mesh(
         new THREE.BoxGeometry(totalW + 10, 0.08, 2),
         pathMat,
@@ -1250,14 +1263,14 @@ export default function Phase3DMap({
       scene.add(g);
     };
     const edge = parcelD / 2 + 3.5;
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; illustrative && i < 7; i++) {
       const x = -totalW / 2 - 3 + (i * (totalW + 6)) / 6;
       tree(x, -edge);
       tree(x, edge);
     }
 
     // Gate / chapel.
-    {
+    if (illustrative) {
       const g = new THREE.Group();
       const wall = new THREE.Mesh(
         new THREE.BoxGeometry(5, 3.4, 4),
@@ -1881,7 +1894,17 @@ export default function Phase3DMap({
                       {modeDecision.unplacedCount} more have no measured
                       position and are not shown.
                     </>
-                  )}
+                  )}{" "}
+                  {/*
+                    Otherwise the survey view reads as broken. It is
+                    emptier than the arrangement on purpose: everything
+                    missing from it is scenery the park never recorded.
+                  */}
+                  <span data-testid="map-scenery-note">
+                    The paths, trees and chapel on the arrangement are
+                    illustrative, so they are left off here — only
+                    measured ground is drawn.
+                  </span>
                 </>
               ) : (
                 <>
