@@ -8,6 +8,7 @@ import {
   boundsOf,
   detailLevelFor,
   LABEL_MIN_ZOOM,
+  shouldLabelLots,
   paddedBounds,
   summariseGardens,
 } from "@/lib/mapDetail";
@@ -455,7 +456,15 @@ export function LeafletRenderer({
         return;
       }
 
-      const labelled = detailLevelFor(zoom) === "labelled";
+      /*
+       * Codes only when they will not sit on top of each other.
+       *
+       * Leaflet draws every tooltip where its lot is and does nothing
+       * about collisions, so at 2.5m spacing the codes land on one
+       * another AND on the plots they name — which is worse than no
+       * codes at all.
+       */
+      const labelled = shouldLabelLots(zoom, lots.length);
 
       for (const lot of lots) {
         const isSelected = lot._id === selectedLotId;

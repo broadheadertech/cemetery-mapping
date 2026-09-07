@@ -17,7 +17,9 @@ import {
   detailLevelFor,
   GARDEN_MARKER_MAX_ZOOM,
   LABEL_MIN_ZOOM,
+  MAX_LABELLED_LOTS,
   paddedBounds,
+  shouldLabelLots,
   summariseGardens,
 } from "@/lib/mapDetail";
 
@@ -168,5 +170,29 @@ describe("summarising a garden into one marker", () => {
 
   it("summarises nothing into nothing", () => {
     expect(summariseGardens([])).toEqual([]);
+  });
+});
+
+describe("when a lot code may be drawn", () => {
+  it("waits for the zoom that makes a code readable", () => {
+    expect(shouldLabelLots(LABEL_MIN_ZOOM - 1, 5)).toBe(false);
+    expect(shouldLabelLots(LABEL_MIN_ZOOM, 5)).toBe(true);
+  });
+
+  it("REFUSES to label a dense garden even when zoomed right in", () => {
+    // Leaflet draws every tooltip where its lot is and does nothing
+    // about collisions. At 2.5m spacing the codes land on each other
+    // AND on the plots they name, which is worse than no codes: the
+    // reader loses both the labels and the view of the lots.
+    expect(shouldLabelLots(20, MAX_LABELLED_LOTS + 1)).toBe(false);
+  });
+
+  it("labels right up to the limit", () => {
+    expect(shouldLabelLots(20, MAX_LABELLED_LOTS)).toBe(true);
+  });
+
+  it("never labels while gardens are being drawn instead of lots", () => {
+    // There are no lot shapes on screen to attach a code to.
+    expect(shouldLabelLots(GARDEN_MARKER_MAX_ZOOM, 1)).toBe(false);
   });
 });
